@@ -1,0 +1,83 @@
+{
+  "projectType": "saas",
+  "projectName": "suSHi",
+  "projectDescription": "A web-based SSH platform for managing and accessing remote machines securely through browser terminals",
+  "theme": "palm",
+  "primaryColor": "#00A8E8",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/web-terminal",
+              "features/machine-management",
+              "features/oauth-authentication",
+              "features/security"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/docker-setup",
+              "deployment/environment-config",
+              "deployment/database-setup"
+            ]
+          },
+          {
+            "group": "Support",
+            "pages": [
+              "support/troubleshooting",
+              "support/faq"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/overview",
+              "api/authentication",
+              "api/machines",
+              "api/ssh-websocket"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Web-based SSH terminal using WebSockets and xterm.js",
+    "Secure credential storage with AES-CFB encryption and PBKDF2 key derivation",
+    "OAuth authentication with Google and GitHub",
+    "Machine management with CRUD operations",
+    "Real-time terminal communication",
+    "Docker deployment with PostgreSQL"
+  ],
+  "publicApiSurface": [
+    "GET /api/v1/auth/url - Get OAuth authorization URL",
+    "GET /api/v1/auth/callback - OAuth callback handler",
+    "GET /api/v1/auth/logout - Logout endpoint",
+    "POST /api/v1/machine - Create new SSH machine",
+    "GET /api/v1/machines - List all machines",
+    "GET /api/v1/machine/{id} - Get specific machine",
+    "DELETE /api/v1/machine/{id} - Delete machine",
+    "POST /api/v1/machine/{id}/connect - Connect to machine",
+    "GET /ssh?uuid={uuid} - WebSocket SSH connection"
+  ]
+}
