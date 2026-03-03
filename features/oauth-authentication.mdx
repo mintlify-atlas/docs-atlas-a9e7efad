@@ -148,12 +148,13 @@ When you sign in with GitHub:
 suSHi requests:
 
 ```javascript
-scopes: ["user:email"]
+scopes: ["read:user", "read:email"]
 ```
 
-**Why this scope?**
+**Why these scopes?**
 
-- **user:email**: Needed to access your verified email addresses
+- **read:user**: Grants read-only access to profile information
+- **read:email**: Needed to access your verified email addresses
 - GitHub doesn't include email in basic profile by default
 - suSHi needs your email to create your account
 

@@ -88,9 +88,9 @@ On success:
 2. JWT token is generated with 24-hour expiration
 3. Token is set as HTTP cookie with the following properties:
    - Name: `jwt`
-   - HttpOnly: `false` (TODO: should be `true` in production)
+   - HttpOnly: `false` (⚠️ should be `true` in production for security)
    - SameSite: `Strict`
-   - Secure: `false` (should be `true` in production)
+   - Secure: `false` (should be `true` in production with HTTPS)
    - Path: `/`
    - Expires: 24 hours from now
 4. Redirects to `/dashboard.html` (HTTP 303)
