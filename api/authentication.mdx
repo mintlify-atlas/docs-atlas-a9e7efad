@@ -1,0 +1,251 @@
+---
+title: Authentication
+description: OAuth 2.0 endpoints and JWT token management
+---
+
+## Overview
+
+suSHi uses OAuth 2.0 for authentication with support for Google and GitHub providers. After successful authentication, a JWT token is issued and stored as an HTTP-only cookie.
+
+## Get Authorization URL
+
+<CodeGroup>
+```bash Google
+curl "http://localhost:8080/api/v1/auth/url?to=google"
+```
+
+```bash GitHub
+curl "http://localhost:8080/api/v1/auth/url?to=github"
+```
+</CodeGroup>
+
+`GET /api/v1/auth/url`
+
+Retrieve the OAuth authorization URL for a specific provider.
+
+### Query Parameters
+
+<ParamField query="to" type="string" required>
+  OAuth provider to use. Valid values:
+  - `google` - Google OAuth
+  - `github` - GitHub OAuth
+</ParamField>
+
+### Response
+
+Returns the authorization URL as plain text:
+
+```
+https://accounts.google.com/o/oauth2/v2/auth?client_id=...&redirect_uri=...&response_type=code&scope=...&state=...
+```
+
+Redirect the user to this URL to initiate the OAuth flow.
+
+### Error Responses
+
+<Expandable title="400 - Missing Query Parameter">
+```json
+{
+  "status": "Bad Request",
+  "message": "Missing query param 'to'",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="400 - Invalid Provider">
+```json
+{
+  "status": "Bad Request",
+  "message": "Invalid query param 'to'",
+  "data": null
+}
+```
+</Expandable>
+
+---
+
+## OAuth Callback
+
+`GET /api/v1/auth/callback`
+
+Handles the OAuth callback from the provider. This endpoint is called automatically by the OAuth provider after user authorization.
+
+### Query Parameters
+
+<ParamField query="state" type="string" required>
+  OAuth state parameter (automatically provided by OAuth provider)
+</ParamField>
+
+<ParamField query="code" type="string" required>
+  Authorization code (automatically provided by OAuth provider)
+</ParamField>
+
+### Response
+
+On success:
+1. User is created in the database (if they don't exist)
+2. JWT token is generated with 24-hour expiration
+3. Token is set as HTTP cookie with the following properties:
+   - Name: `jwt`
+   - HttpOnly: `false` (TODO: should be `true` in production)
+   - SameSite: `Strict`
+   - Secure: `false` (should be `true` in production)
+   - Path: `/`
+   - Expires: 24 hours from now
+4. Redirects to `/dashboard.html` (HTTP 303)
+
+### JWT Token Claims
+
+The JWT token contains the following claims:
+
+```json
+{
+  "username": "user@example.com",
+  "iat": 1709481600,
+  "exp": 1709568000
+}
+```
+
+<ResponseField name="username" type="string">
+  User's email address from OAuth provider
+</ResponseField>
+
+<ResponseField name="iat" type="number">
+  Issued at timestamp (Unix epoch)
+</ResponseField>
+
+<ResponseField name="exp" type="number">
+  Expiration timestamp (Unix epoch, 24 hours after issuance)
+</ResponseField>
+
+### Error Responses
+
+<Expandable title="400 - Missing State">
+```json
+{
+  "status": "Bad Request",
+  "message": "Missing query param 'state'",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="400 - Missing Code">
+```json
+{
+  "status": "Bad Request",
+  "message": "Missing query param 'code'",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="400 - Invalid State">
+```json
+{
+  "status": "Bad Request",
+  "message": "Invalid query param 'state'",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="500 - OAuth Error">
+```json
+{
+  "status": "Internal Server Error",
+  "message": "Error message from OAuth provider",
+  "data": null
+}
+```
+</Expandable>
+
+---
+
+## Logout
+
+```bash cURL
+curl -X GET "http://localhost:8080/api/v1/auth/logout" \
+  -b "jwt=your-jwt-token"
+```
+
+`GET /api/v1/auth/logout`
+
+Invalidates the current JWT token by expiring the cookie.
+
+### Response
+
+```json
+{
+  "status": "OK",
+  "message": "Logged out successfully",
+  "data": null
+}
+```
+
+The JWT cookie is expired by setting its expiration time to 10 seconds in the past.
+
+---
+
+## JWT Authentication for API Requests
+
+All endpoints under `/api/v1/*` (except `/api/v1/auth/*`) require JWT authentication.
+
+### Implementation Details
+
+- **Algorithm**: HS256 (HMAC-SHA256)
+- **Token Location**: HTTP cookie named `jwt`
+- **Token Lifetime**: 24 hours
+- **Middleware**: Uses `jwtauth` verifier and authenticator
+
+### Using JWT in Requests
+
+The JWT token is automatically included in requests when using a browser. For API clients:
+
+```bash
+curl -X GET "http://localhost:8080/api/v1/machines" \
+  -b "jwt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+### Extracting Username from Token
+
+All protected endpoints extract the username from the JWT token claims:
+
+```go
+username := claims["username"].(string)
+```
+
+This username is used for authorization and data filtering.
+
+### Error Responses
+
+<Expandable title="401 - Missing Token">
+```json
+{
+  "status": "Unauthorized",
+  "message": "No token found",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="401 - Invalid Token">
+```json
+{
+  "status": "Unauthorized",
+  "message": "Invalid token",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="401 - Expired Token">
+```json
+{
+  "status": "Unauthorized",
+  "message": "Token is expired",
+  "data": null
+}
+```
+</Expandable>

@@ -1,0 +1,532 @@
+---
+title: Frequently Asked Questions
+description: Common questions and answers about SuSHi
+---
+
+## General Questions
+
+<Accordion title="What is SuSHi?">
+SuSHi is a web-based platform that enables SSH connections to remote machines from any location using a browser-based terminal. It provides secure SSH access through a modern web interface with real-time communication via WebSockets.
+
+**Key Features:**
+- Secure SSH connections with encrypted private key storage
+- Web-based terminal accessible from any browser
+- OAuth authentication (Google and GitHub)
+- Real-time bidirectional communication
+- Multi-user support with user-specific machine management
+</Accordion>
+
+<Accordion title="Is SuSHi production-ready?">
+SuSHi is currently a Work in Progress (WIP). While it provides core SSH connectivity functionality, there are several security and feature enhancements recommended before production deployment:
+
+- Set `HttpOnly: true` for cookies in production
+- Enable `Secure: true` for HTTPS deployments
+- Configure proper host key verification instead of `InsecureIgnoreHostKey()`
+- Implement rate limiting and authentication throttling
+- Use strong, unique JWT secrets
+</Accordion>
+
+<Accordion title="What are the system requirements?">
+**Server Requirements:**
+- Docker and Docker Compose
+- 512MB+ RAM for backend service
+- PostgreSQL 12+ (provided via Docker)
+- Port 8080 available (or custom port)
+
+**Client Requirements:**
+- Modern web browser with WebSocket support
+- Internet connection to SuSHi server
+- No special software or extensions required
+</Accordion>
+
+<Accordion title="How is data stored and secured?">
+**Private Key Encryption:**
+- Algorithm: AES-CFB encryption
+- Key Derivation: PBKDF2-HMAC-SHA256 with 10,000 iterations
+- Unique salt and IV (Initialization Vector) for each encryption
+- User password required for decryption
+
+**Database:**
+- PostgreSQL stores user data, machine configurations, and encrypted private keys
+- Passwords used for encryption are not stored (user must enter on connection)
+- JWT tokens for session management
+
+<Warning>
+If you forget the password used to encrypt a private key, the key cannot be recovered. You'll need to delete and re-add the machine with a new key.
+</Warning>
+</Accordion>
+
+---
+
+## Authentication
+
+<Accordion title="What authentication methods are supported?">
+SuSHi currently supports OAuth 2.0 authentication through:
+
+1. **Google OAuth**
+   - Requires Google Client ID and Client Secret
+   - Redirect URL: `http://localhost:8080/api/v1/auth/callback`
+
+2. **GitHub OAuth**
+   - Requires GitHub Client ID and Client Secret
+   - Redirect URL: `http://localhost:8080/api/v1/auth/callback`
+
+Both providers require configuration in the docker-compose.yaml environment variables.
+</Accordion>
+
+<Accordion title="How do I set up OAuth authentication?">
+**For Google:**
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select existing
+3. Enable Google+ API
+4. Create OAuth 2.0 credentials
+5. Set authorized redirect URI: `http://localhost:8080/api/v1/auth/callback`
+6. Copy Client ID and Client Secret to docker-compose.yaml
+
+**For GitHub:**
+1. Go to Settings > Developer settings > OAuth Apps
+2. Create a new OAuth App
+3. Set Authorization callback URL: `http://localhost:8080/api/v1/auth/callback`
+4. Copy Client ID and generate a Client Secret
+5. Add credentials to docker-compose.yaml
+
+<Note>
+Update the redirect URL to match your deployment domain in production (e.g., `https://yourdomain.com/api/v1/auth/callback`).
+</Note>
+</Accordion>
+
+<Accordion title="How long do sessions last?">
+JWT tokens are issued upon successful OAuth authentication and stored as cookies. The expiration time is set during token generation (utils/jwt_utils.go). 
+
+When you log out, the cookie is immediately expired by setting the expiration to 10 seconds in the past.
+</Accordion>
+
+<Accordion title="Can I use both Google and GitHub authentication simultaneously?">
+Yes, both OAuth providers can be configured at the same time. Users can choose which provider to use during login. The authentication state parameter distinguishes between providers (controllers/oauth.go:60).
+</Accordion>
+
+---
+
+## SSH Connections
+
+<Accordion title="What SSH authentication methods are supported?">
+Currently, SuSHi supports **private key authentication** with optional passphrase protection.
+
+**Supported Key Formats:**
+- OpenSSH format
+- RSA format
+- Keys with or without passphrases
+
+**Not Currently Supported:**
+- Password-based SSH authentication
+- SSH agent forwarding
+- Certificate-based authentication
+</Accordion>
+
+<Accordion title="How do I add a new machine?">
+1. Log in to SuSHi
+2. Navigate to the dashboard
+3. Click "Add Machine"
+4. Provide the following information:
+   - **Name:** Friendly name for the machine
+   - **Hostname:** IP address or domain name
+   - **Port:** SSH port (typically 22)
+   - **Username:** SSH username on the remote machine
+   - **Private Key:** Your SSH private key
+   - **Passphrase:** (Optional) If your key is passphrase-protected
+   - **Password:** Password to encrypt the private key in database
+   - **Organization:** (Optional) For grouping machines
+
+5. Click "Save"
+
+The private key will be encrypted with AES using your provided password before being stored.
+</Accordion>
+
+<Accordion title="How do I connect to a machine?">
+1. From your dashboard, view your list of saved machines
+2. Click on the machine you want to connect to
+3. Enter the password you used when adding the machine (for decryption)
+4. Click "Connect"
+5. A web terminal will open with an active SSH session
+
+A unique UUID is generated for each connection and used to maintain the WebSocket session.
+</Accordion>
+
+<Accordion title="Can multiple users connect to the same machine?">
+Yes, each user manages their own machine configurations independently. Multiple users can have the same remote machine configured with their own credentials, and multiple simultaneous connections are supported.
+
+Each connection is isolated with its own:
+- WebSocket connection
+- SSH session
+- UUID identifier
+- Time bucket for tracking
+</Accordion>
+
+<Accordion title="What happens if my connection drops?">
+If the WebSocket connection drops:
+- The SSH session on the server will be closed
+- The connection will be removed from the active connection map
+- You'll need to reconnect through the dashboard
+- A new UUID will be generated for the new connection
+
+<Note>
+Unsaved terminal state (command history, unsaved files, etc.) will be lost. Always save your work on the remote machine.
+</Note>
+</Accordion>
+
+<Accordion title="How are connections kept alive?">
+SuSHi uses a heartbeat mechanism to keep connections active:
+
+- Client sends heartbeat messages via WebSocket
+- Server updates the time bucket for the connection
+- Timestamps are rounded to the nearest minute for efficient tracking
+- See controllers/ssh.go:134 for implementation details
+
+This prevents timeout disconnections on long-running sessions.
+</Accordion>
+
+---
+
+## Deployment
+
+<Accordion title="How do I deploy SuSHi?">
+**Quick Start:**
+
+1. Create required directories:
+   ```bash
+   mkdir -p db/data
+   sudo chown -R 1001:1001 ./db/data
+   ```
+
+2. Configure docker-compose.yaml with environment variables:
+   - Database credentials
+   - JWT secret
+   - OAuth client IDs and secrets
+
+3. Start the services:
+   ```bash
+   docker compose up
+   ```
+
+4. Access SuSHi at `http://localhost:8080`
+
+For detailed deployment instructions, see the [Deployment Guide](/deployment/docker-setup).
+</Accordion>
+
+<Accordion title="Can I use a different database?">
+Currently, SuSHi is designed to work with PostgreSQL. The database connection is configured via environment variables:
+
+- `DB_HOST`
+- `DB_PORT`
+- `DB_USER`
+- `DB_PASSWORD`
+- `DB_NAME`
+
+You can point to an external PostgreSQL instance by modifying these values in docker-compose.yaml.
+</Accordion>
+
+<Accordion title="How do I update SuSHi?">
+1. Pull the latest image:
+   ```bash
+   docker pull breeze5690/sushi-backend-prod:v1
+   ```
+
+2. Stop and remove containers:
+   ```bash
+   docker compose down
+   ```
+
+3. Start with the new image:
+   ```bash
+   docker compose up
+   ```
+
+<Warning>
+Database migrations should run automatically if `MIGRATE_DB=true` is set. Always backup your database before updating.
+</Warning>
+</Accordion>
+
+<Accordion title="Can I run SuSHi behind a reverse proxy?">
+Yes, SuSHi can run behind reverse proxies like Nginx or Traefik. Important considerations:
+
+**WebSocket Support:**
+- Ensure your reverse proxy passes WebSocket upgrade headers
+- Configure timeout settings for long-lived connections
+
+**Example Nginx configuration:**
+```nginx
+location /ws {
+    proxy_pass http://sushi-backend:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+```
+
+**SSL/TLS:**
+- Use `wss://` in terminal.html when behind HTTPS
+- Set cookie `Secure: true` in production
+</Accordion>
+
+<Accordion title="What ports does SuSHi use?">
+**Default Ports:**
+- `8080` - SuSHi backend HTTP/WebSocket server
+- `5432` - PostgreSQL database (container only)
+
+You can customize the exposed ports in docker-compose.yaml:
+```yaml
+ports:
+  - "3000:8080"  # Expose backend on port 3000
+```
+</Accordion>
+
+---
+
+## Security
+
+<Accordion title="Is my private key secure?">
+Your private key is encrypted before storage:
+
+1. **Encryption Process:**
+   - You provide a password when adding a machine
+   - A random salt is generated
+   - PBKDF2 derives an encryption key from your password and salt (10,000 iterations)
+   - Private key is encrypted using AES-CFB
+   - Encrypted key, salt, and IV are stored in the database
+
+2. **Decryption Process:**
+   - You enter your password when connecting
+   - The same key derivation process recreates the encryption key
+   - Private key is decrypted and used only in memory for the SSH connection
+   - Password is never stored
+
+<Info>
+Your password never leaves your browser in plain text and is used only for client-side encryption/decryption operations.
+</Info>
+</Accordion>
+
+<Accordion title="Should I use SuSHi for production servers?">
+While SuSHi provides encrypted key storage and secure connections, consider these factors:
+
+**Current Security Considerations:**
+- Host key verification uses `InsecureIgnoreHostKey()` (vulnerable to MITM attacks)
+- Cookies not fully hardened for production (HttpOnly, Secure flags)
+- No built-in rate limiting or brute force protection
+- Work in Progress status
+
+**Recommendations:**
+- Use for development and non-critical environments
+- Implement additional security hardening before production use
+- Run behind a firewall with restricted access
+- Use strong, unique passwords for key encryption
+- Regular security audits and updates
+</Accordion>
+
+<Accordion title="What are the security best practices?">
+1. **Strong JWT Secret:**
+   - Use a long, random string for `JWT_SECRET`
+   - Never commit secrets to version control
+
+2. **OAuth Configuration:**
+   - Keep client secrets secure
+   - Use environment variables, not hardcoded values
+   - Restrict redirect URIs to your domain only
+
+3. **Database Security:**
+   - Use strong database passwords
+   - Restrict database port exposure
+   - Regular backups with encryption
+
+4. **Network Security:**
+   - Run behind HTTPS in production
+   - Use firewall rules to restrict access
+   - Consider VPN for additional security layer
+
+5. **Key Management:**
+   - Use strong passwords for key encryption
+   - Rotate SSH keys regularly
+   - Delete unused machine configurations
+</Accordion>
+
+---
+
+## Technical Questions
+
+<Accordion title="What technology stack does SuSHi use?">
+**Backend:**
+- Language: Go (Golang)
+- Web Framework: Chi router
+- WebSocket: Gorilla WebSocket
+- SSH: golang.org/x/crypto/ssh
+- Database: PostgreSQL
+- Authentication: OAuth 2.0 (Google, GitHub)
+- JWT: Custom implementation
+
+**Frontend:**
+- HTML/CSS/JavaScript
+- WebSocket API for real-time communication
+- Static files served by the backend
+
+**Infrastructure:**
+- Docker for containerization
+- Docker Compose for orchestration
+</Accordion>
+
+<Accordion title="How does the WebSocket connection work?">
+1. **Connection Establishment:**
+   - User connects to a machine and receives a UUID
+   - Browser opens WebSocket connection to `/ws?uuid={UUID}`
+   - Server upgrades HTTP connection to WebSocket
+
+2. **Communication Flow:**
+   - User input → WebSocket → Server → SSH stdin → Remote machine
+   - Remote machine → SSH stdout → Server → WebSocket → Browser
+
+3. **Message Types:**
+   - `heartbeat`: Keep-alive messages
+   - `data`: Terminal input/output
+
+4. **Session Management:**
+   - UUID maps to SSH connection in server memory
+   - Time buckets track active connections
+   - Goroutines handle bidirectional communication
+
+See controllers/ssh.go for implementation details.
+</Accordion>
+
+<Accordion title="Can I customize the terminal appearance?">
+Yes, the terminal appearance can be customized by modifying `static/terminal.html`. The SSH session uses xterm terminal emulation with configurable:
+
+- Terminal type: "xterm" (line 109 in controllers/ssh.go)
+- Dimensions: 600 rows × 800 columns (default)
+- Terminal modes: Echo, input/output speed
+
+For advanced customization, you can integrate terminal emulation libraries like xterm.js.
+</Accordion>
+
+<Accordion title="What logging capabilities are available?">
+SuSHi uses zerolog for structured logging with configurable log levels:
+
+**Log Levels:**
+- `Debug`: Detailed debugging information (tokens, UUIDs, connections)
+- `Info`: General informational messages
+- `Warning`: Warning messages
+- `Error`: Error messages with stack traces
+
+**Configuration:**
+Set the `LOG_LEVEL` environment variable in docker-compose.yaml.
+
+**What's Logged:**
+- Authentication events (OAuth, JWT)
+- SSH connection establishment and errors
+- WebSocket connection lifecycle
+- Database operations
+- Encryption/decryption operations
+
+<Note>
+Use Debug level only in development as it logs sensitive information like JWT tokens and UUIDs.
+</Note>
+</Accordion>
+
+<Accordion title="Is there an API for programmatic access?">
+SuSHi provides a REST API for machine management and authentication:
+
+**Authentication Endpoints:**
+- `GET /api/v1/auth/url?to={provider}` - Get OAuth URL
+- `GET /api/v1/auth/callback` - OAuth callback
+- `POST /api/v1/auth/logout` - Logout
+
+**Machine Management:**
+- `POST /api/v1/machines` - Create machine
+- `GET /api/v1/machines` - List machines
+- `GET /api/v1/machines/{id}` - Get machine details
+- `DELETE /api/v1/machines/{id}` - Delete machine
+- `POST /api/v1/machines/{id}/connect` - Connect to machine
+
+**WebSocket:**
+- `WS /ws?uuid={uuid}` - Terminal WebSocket connection
+
+All machine management endpoints require JWT authentication.
+</Accordion>
+
+---
+
+## Contributing and Support
+
+<Accordion title="How can I contribute to SuSHi?">
+SuSHi is an open-source project. You can contribute by:
+
+1. **Code Contributions:**
+   - Fork the repository
+   - Create a feature branch
+   - Submit pull requests
+
+2. **Bug Reports:**
+   - Open issues on GitHub
+   - Provide detailed reproduction steps
+   - Include logs and environment details
+
+3. **Documentation:**
+   - Improve existing documentation
+   - Add examples and tutorials
+   - Translate documentation
+
+4. **Feature Requests:**
+   - Suggest new features via GitHub issues
+   - Discuss implementation approaches
+
+Visit the [GitHub repository](https://github.com/aswinbennyofficial/SuSHi) to get started.
+</Accordion>
+
+<Accordion title="Where can I get help?">
+If you need assistance:
+
+1. **Documentation:**
+   - Check the [Troubleshooting Guide](/support/troubleshooting)
+   - Review this FAQ
+   - Read the source README.md
+
+2. **GitHub Issues:**
+   - Search existing issues
+   - Open a new issue with details
+   - Follow the issue template
+
+3. **Enable Debug Logging:**
+   - Set `LOG_LEVEL=Debug`
+   - Review logs for specific errors
+   - Include relevant logs when asking for help
+</Accordion>
+
+<Accordion title="What are the known limitations?">
+**Current Limitations:**
+
+1. **Authentication:**
+   - Only OAuth (no local accounts)
+   - Only private key SSH auth (no password auth)
+
+2. **Security:**
+   - Host key verification disabled (`InsecureIgnoreHostKey`)
+   - Cookie security settings need hardening for production
+
+3. **Features:**
+   - No file transfer capabilities (SCP/SFTP)
+   - No SSH agent forwarding
+   - No port forwarding
+   - No session recording/playback
+   - No collaborative terminals
+
+4. **Deployment:**
+   - Single-instance only (no horizontal scaling)
+   - In-memory connection storage (lost on restart)
+
+These limitations may be addressed in future releases.
+</Accordion>
+
+---
+
+<Info>
+Have a question not answered here? Check the [Troubleshooting Guide](/support/troubleshooting) or open an issue on GitHub.
+</Info>

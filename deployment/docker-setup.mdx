@@ -1,0 +1,310 @@
+---
+title: Docker Deployment
+description: Deploy suSHi using Docker and Docker Compose for production environments
+---
+
+## Overview
+
+suSHi provides a complete Docker-based deployment solution using Docker Compose. The application runs in a multi-container setup with PostgreSQL as the database backend.
+
+## Architecture
+
+The Docker deployment consists of two main services:
+
+- **postgres**: PostgreSQL database using the Bitnami image
+- **sushi-backend**: The main suSHi application server
+
+## Prerequisites
+
+Before deploying suSHi with Docker, ensure you have:
+
+- Docker Engine 20.10 or later
+- Docker Compose 3.8 or later
+- At least 2GB of available RAM
+- Ports 8080 and 5432 available on your host
+
+## Quick Start
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/aswinbennyofficial/SuSHi.git
+    cd SuSHi
+    ```
+  </Step>
+
+  <Step title="Configure environment variables">
+    Edit the `docker-compose.yaml` file to set your environment variables, especially:
+    - `JWT_SECRET`: Change from the default value
+    - OAuth credentials for Google and GitHub if using authentication
+    
+    See the [Environment Configuration](/deployment/environment-config) page for details.
+  </Step>
+
+  <Step title="Start the services">
+    ```bash
+    docker-compose up -d
+    ```
+    
+    This will:
+    - Pull the PostgreSQL image
+    - Pull the suSHi backend image (or build it if using a local Dockerfile)
+    - Start both containers
+    - Run database migrations automatically
+  </Step>
+
+  <Step title="Verify deployment">
+    Check that all services are running:
+    ```bash
+    docker-compose ps
+    ```
+    
+    You should see both `postgres` and `sushi-backend` containers running.
+  </Step>
+
+  <Step title="Access the application">
+    The suSHi API will be available at:
+    ```
+    http://localhost:8080
+    ```
+  </Step>
+</Steps>
+
+## Docker Compose Configuration
+
+The `docker-compose.yaml` file defines the complete deployment:
+
+```yaml
+version: '3.8'
+
+services:
+  postgres:
+    image: bitnami/postgresql
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sushi
+    volumes:
+      - ./db/data:/bitnami/postgresql/data
+    restart: always
+
+  sushi-backend:
+    image: breeze5690/sushi-backend-prod:v1
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVER_PORT=8080
+      - LOG_LEVEL=Debug
+      - JWT_SECRET=secret123
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=sushi
+      - MIGRATE_DB=true
+      - GOOGLE_CLIENT_ID=
+      - GOOGLE_CLIENT_SECRET=
+      - GOOGLE_REDIRECT_URL=http://localhost:8080/api/v1/auth/callback
+      - GITHUB_CLIENT_ID=
+      - GITHUB_CLIENT_SECRET=
+      - GITHUB_REDIRECT_URL=http://localhost:8080/api/v1/auth/callback
+    depends_on:
+      - postgres
+    restart: always
+```
+
+### Port Mappings
+
+| Service | Container Port | Host Port | Description |
+|---------|---------------|-----------|-------------|
+| postgres | 5432 | 5432 | PostgreSQL database |
+| sushi-backend | 8080 | 8080 | suSHi API server |
+
+### Volume Mounts
+
+- `./db/data:/bitnami/postgresql/data` - Persists PostgreSQL data on the host machine
+
+<Warning>
+  The database volume mount ensures that your data persists across container restarts. Make sure to backup the `./db/data` directory regularly.
+</Warning>
+
+## Building from Source
+
+To build the suSHi backend image from source instead of using the pre-built image:
+
+<Steps>
+  <Step title="Review the Dockerfile">
+    The multi-stage Dockerfile optimizes the image size:
+    
+    ```dockerfile
+    # Build stage
+    FROM golang:latest AS builder
+    COPY . /sushi-backend
+    WORKDIR /sushi-backend
+    RUN go build -o app .
+
+    # Production stage
+    FROM debian
+    RUN apt update && apt install -y ca-certificates
+    
+    RUN mkdir /sushi-backend
+    RUN mkdir /sushi-backend/logs
+    RUN mkdir /sushi-backend/db
+    
+    COPY ./db /sushi-backend/db
+    COPY ./static /sushi-backend/static
+    COPY ./config /sushi-backend/config
+    COPY --from=builder /sushi-backend/app /sushi-backend/app
+    
+    RUN chmod +x /sushi-backend/app
+    WORKDIR /sushi-backend
+    
+    CMD ["./app"]
+    ```
+  </Step>
+
+  <Step title="Update docker-compose.yaml">
+    Replace the `image` line with a `build` directive:
+    
+    ```yaml
+    sushi-backend:
+      build: .
+      ports:
+        - "8080:8080"
+      # ... rest of configuration
+    ```
+  </Step>
+
+  <Step title="Build and start">
+    ```bash
+    docker-compose up -d --build
+    ```
+  </Step>
+</Steps>
+
+## Docker Image Structure
+
+The production image includes:
+
+- **Base**: Debian with CA certificates
+- **Binary**: Compiled Go application (`/sushi-backend/app`)
+- **Database migrations**: SQL files in `/sushi-backend/db/migrations/`
+- **Static files**: Frontend assets in `/sushi-backend/static/`
+- **Configuration**: OAuth config in `/sushi-backend/config/`
+- **Logs directory**: `/sushi-backend/logs/` for application logs
+
+## Container Management
+
+### View Logs
+
+<CodeGroup>
+```bash View all logs
+docker-compose logs
+```
+
+```bash Follow logs in real-time
+docker-compose logs -f
+```
+
+```bash View specific service logs
+docker-compose logs sushi-backend
+docker-compose logs postgres
+```
+</CodeGroup>
+
+### Restart Services
+
+```bash
+# Restart all services
+docker-compose restart
+
+# Restart specific service
+docker-compose restart sushi-backend
+```
+
+### Stop and Remove
+
+```bash
+# Stop services
+docker-compose down
+
+# Stop and remove volumes (WARNING: deletes data)
+docker-compose down -v
+```
+
+## Production Considerations
+
+<Warning>
+  **Security**: Always change the default values for:
+  - `JWT_SECRET` - Use a strong, randomly generated secret
+  - `POSTGRES_PASSWORD` - Use a secure password
+  - Database credentials should match between postgres and sushi-backend services
+</Warning>
+
+### Recommended Production Changes
+
+1. **Change default credentials**:
+   ```yaml
+   environment:
+     POSTGRES_USER: your_secure_user
+     POSTGRES_PASSWORD: your_secure_password
+     JWT_SECRET: your_random_jwt_secret_min_32_chars
+   ```
+
+2. **Set production log level**:
+   ```yaml
+   - LOG_LEVEL=Info
+   ```
+
+3. **Configure OAuth providers** - Add your OAuth credentials for authentication
+
+4. **Enable SSL/TLS** - Use a reverse proxy like Nginx or Traefik
+
+5. **Backup strategy** - Implement regular backups of the PostgreSQL data volume
+
+6. **Resource limits** - Add memory and CPU limits to containers:
+   ```yaml
+   sushi-backend:
+     deploy:
+       resources:
+         limits:
+           cpus: '1.0'
+           memory: 512M
+   ```
+
+## Troubleshooting
+
+### Container won't start
+
+Check container logs:
+```bash
+docker-compose logs sushi-backend
+```
+
+### Database connection failed
+
+Ensure the `DB_HOST` environment variable matches the PostgreSQL service name:
+```yaml
+- DB_HOST=postgres  # Must match service name in docker-compose.yaml
+```
+
+### Migrations not running
+
+Verify that `MIGRATE_DB=true` is set in the sushi-backend environment variables.
+
+### Port already in use
+
+Change the host port mapping in docker-compose.yaml:
+```yaml
+ports:
+  - "8081:8080"  # Maps host port 8081 to container port 8080
+```
+
+## Next Steps
+
+- Configure [Environment Variables](/deployment/environment-config) for your deployment
+- Learn about [Database Setup](/deployment/database-setup) and migrations
+- Set up OAuth authentication providers

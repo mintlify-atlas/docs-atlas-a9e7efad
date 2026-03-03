@@ -1,0 +1,616 @@
+---
+title: SSH WebSocket
+description: Real-time SSH terminal connection via WebSocket
+---
+
+## Overview
+
+The SSH WebSocket endpoint provides a bidirectional connection for real-time terminal interaction with SSH machines. This endpoint does NOT require JWT authentication but requires a valid UUID from the connect endpoint.
+
+## WebSocket Connection
+
+```javascript JavaScript
+const uuid = '550e8400-e29b-41d4-a716-446655440000'; // From /api/v1/machine/{id}/connect
+const ws = new WebSocket(`ws://localhost:8080/ssh?uuid=${uuid}`);
+
+ws.onopen = () => {
+  console.log('SSH WebSocket connected');
+};
+
+ws.onmessage = (event) => {
+  // Terminal output from SSH server
+  console.log('Output:', event.data);
+};
+
+ws.onerror = (error) => {
+  console.error('WebSocket error:', error);
+};
+
+ws.onclose = () => {
+  console.log('SSH WebSocket closed');
+};
+```
+
+```python Python
+import websocket
+import json
+
+uuid = '550e8400-e29b-41d4-a716-446655440000'  # From /api/v1/machine/{id}/connect
+ws = websocket.create_connection(f'ws://localhost:8080/ssh?uuid={uuid}')
+
+# Send command
+message = {
+    "type": "input",
+    "data": "ls -la\n"
+}
+ws.send(json.dumps(message))
+
+# Receive output
+output = ws.recv()
+print(output)
+
+ws.close()
+```
+
+`GET /ssh`
+
+Establish WebSocket connection for SSH terminal interaction.
+
+## Connection Setup
+
+### Prerequisites
+
+1. Call `POST /api/v1/machine/{id}/connect` to get a UUID
+2. Use the UUID to establish WebSocket connection within the same time bucket
+
+### Query Parameters
+
+<ParamField query="uuid" type="string" required>
+  Connection UUID obtained from the connect endpoint
+</ParamField>
+
+### Upgrade Headers
+
+```
+GET /ssh?uuid=550e8400-e29b-41d4-a716-446655440000 HTTP/1.1
+Host: localhost:8080
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
+Sec-WebSocket-Version: 13
+```
+
+---
+
+## Terminal Configuration
+
+The SSH session is configured with the following pseudo-terminal settings:
+
+<ParamField path="Terminal Type" type="string">
+  `xterm` - Standard terminal type
+</ParamField>
+
+<ParamField path="Rows" type="number">
+  `600` - Terminal height in rows
+</ParamField>
+
+<ParamField path="Columns" type="number">
+  `800` - Terminal width in columns
+</ParamField>
+
+<ParamField path="Terminal Modes" type="object">
+  ```json
+  {
+    "ECHO": 1,
+    "TTY_OP_ISPEED": 14400,
+    "TTY_OP_OSPEED": 14400
+  }
+  ```
+</ParamField>
+
+---
+
+## Message Protocol
+
+### Client to Server Messages
+
+All messages from client to server must be JSON-encoded with the following structure:
+
+```json
+{
+  "type": "string",
+  "data": "string"
+}
+```
+
+<ParamField body="type" type="string" required>
+  Message type. Valid values:
+  - `heartbeat` - Keep-alive message
+  - Any other value - Treated as terminal input
+</ParamField>
+
+<ParamField body="data" type="string" required>
+  Message payload:
+  - For heartbeat: empty string or any value (ignored)
+  - For input: terminal input text (commands, keystrokes, etc.)
+</ParamField>
+
+#### Input Message
+
+Send terminal input to the SSH server:
+
+```json
+{
+  "type": "input",
+  "data": "ls -la\n"
+}
+```
+
+```javascript JavaScript Example
+const message = {
+  type: 'input',
+  data: 'ls -la\n'
+};
+ws.send(JSON.stringify(message));
+```
+
+The `data` field should contain the exact text to send to the terminal, including special characters:
+- `\n` - Enter key
+- `\t` - Tab key
+- `\x03` - Ctrl+C
+- `\x04` - Ctrl+D
+
+#### Heartbeat Message
+
+Send periodic heartbeats to keep the connection alive:
+
+```json
+{
+  "type": "heartbeat",
+  "data": ""
+}
+```
+
+```javascript JavaScript Example
+// Send heartbeat every 30 seconds
+setInterval(() => {
+  const message = {
+    type: 'heartbeat',
+    data: ''
+  };
+  ws.send(JSON.stringify(message));
+}, 30000);
+```
+
+**Heartbeat Behavior:**
+- Updates the connection's time bucket to current time (rounded to nearest minute)
+- Prevents automatic cleanup of the SSH connection
+- Does NOT send any data to the SSH server
+- Logs: `"Heartbeat received, time bucket updated"`
+
+**Important:** Send heartbeats regularly to prevent connection timeout. The server uses time buckets for connection cleanup.
+
+---
+
+### Server to Client Messages
+
+The server sends terminal output as **raw text** (NOT JSON):
+
+```
+user@hostname:~$ ls -la
+total 48
+drwxr-xr-x 6 user user 4096 Mar  3 10:30 .
+drwxr-xr-x 3 root root 4096 Mar  1 09:15 ..
+-rw-r--r-- 1 user user  220 Mar  1 09:15 .bash_logout
+```
+
+```javascript JavaScript Example
+ws.onmessage = (event) => {
+  // event.data contains raw terminal output
+  terminal.write(event.data);
+};
+```
+
+**Notes:**
+- Messages are sent in chunks (1024 bytes) as they arrive from SSH stdout
+- Messages contain ANSI escape codes for colors, cursor movement, etc.
+- No JSON wrapping - output is sent directly as received from SSH session
+
+---
+
+## Connection Lifecycle
+
+### 1. Establish Connection
+
+```javascript
+const uuid = await connectToMachine(machineId, password);
+const ws = new WebSocket(`ws://localhost:8080/ssh?uuid=${uuid}`);
+```
+
+### 2. Handle Connection Events
+
+```javascript
+ws.onopen = () => {
+  console.log('Connected to SSH server');
+  
+  // Start heartbeat
+  heartbeatInterval = setInterval(() => {
+    ws.send(JSON.stringify({ type: 'heartbeat', data: '' }));
+  }, 30000);
+};
+
+ws.onmessage = (event) => {
+  // Display terminal output
+  terminal.write(event.data);
+};
+
+ws.onerror = (error) => {
+  console.error('WebSocket error:', error);
+};
+
+ws.onclose = (event) => {
+  console.log('Connection closed:', event.code, event.reason);
+  clearInterval(heartbeatInterval);
+};
+```
+
+### 3. Send Terminal Input
+
+```javascript
+// User types in terminal
+terminal.onData((data) => {
+  const message = {
+    type: 'input',
+    data: data
+  };
+  ws.send(JSON.stringify(message));
+});
+```
+
+### 4. Close Connection
+
+```javascript
+ws.close();
+```
+
+---
+
+## Concurrency Model
+
+The WebSocket handler spawns two concurrent goroutines for bidirectional communication:
+
+### Read Goroutine (WebSocket → SSH)
+
+```
+WebSocket → JSON Parser → Message Router → SSH stdin
+```
+
+- Reads messages from WebSocket
+- Parses JSON to extract type and data
+- Routes heartbeat messages to time bucket updater
+- Writes input messages to SSH stdin
+- Terminates on WebSocket read error
+
+### Write Goroutine (SSH → WebSocket)
+
+```
+SSH stdout → Buffer (1024 bytes) → WebSocket
+```
+
+- Reads from SSH stdout in 1024-byte chunks
+- Writes raw output to WebSocket as text messages
+- Terminates on SSH stdout EOF or WebSocket write error
+
+**Synchronization:**
+- Uses `sync.WaitGroup` to coordinate goroutine lifecycle
+- Both goroutines must complete before connection cleanup
+- Error in either goroutine causes full connection teardown
+
+---
+
+## Time Bucket Management
+
+The server uses time buckets for automatic connection cleanup:
+
+### Time Bucket Concept
+
+<ParamField path="Time Bucket Key" type="time.Time">
+  Current time rounded to the nearest minute
+</ParamField>
+
+<ParamField path="SSH Connection" type="object">
+  ```go
+  type SSHConnection struct {
+    TimeBucketKey time.Time
+    Client        *ssh.Client
+  }
+  ```
+</ParamField>
+
+### Connection Storage
+
+1. When connection is created:
+   - UUID → `SSHConnection{TimeBucketKey, Client}`
+   - TimeBucket → `[]UUID`
+
+2. When heartbeat is received:
+   - Update `SSHConnection.TimeBucketKey` to current time bucket
+   - Move UUID to new time bucket list
+
+3. Cleanup process:
+   - Periodically scan old time buckets
+   - Close SSH connections in expired buckets
+   - Remove UUIDs from storage
+
+### Best Practices
+
+- Send heartbeat every 30 seconds to prevent timeout
+- Connection lifetime depends on heartbeat frequency
+- Missing heartbeats → connection placed in old time bucket → cleanup
+
+---
+
+## Error Handling
+
+### Connection Errors
+
+<Expandable title="Invalid UUID">
+**Symptom:** WebSocket connection immediately closes
+
+**Cause:** UUID not found in connection storage
+
+**Log:** `"No SSH connection found for UUID: {uuid}"`
+
+**Solution:** Call `/api/v1/machine/{id}/connect` again to get a new UUID
+</Expandable>
+
+<Expandable title="SSH Session Error">
+**Symptom:** WebSocket closes after connection
+
+**Cause:** Failed to create SSH session
+
+**Log:** `"Failed to create session: {error}"`
+
+**Solution:** Check if SSH server is accessible and machine credentials are correct
+</Expandable>
+
+<Expandable title="Pipe Setup Error">
+**Symptom:** WebSocket closes immediately
+
+**Cause:** Failed to set up SSH stdin/stdout pipes
+
+**Log:** `"Failed to set up pipes: {error}"`
+
+**Solution:** This indicates an SSH library error - check server logs
+</Expandable>
+
+<Expandable title="Shell Start Error">
+**Symptom:** WebSocket closes before any output
+
+**Cause:** Failed to start remote shell
+
+**Log:** `"Failed to start shell: {error}"`
+
+**Solution:** Check SSH server configuration and user permissions
+</Expandable>
+
+### Runtime Errors
+
+<Expandable title="WebSocket Read Error">
+**Symptom:** Connection terminates unexpectedly
+
+**Cause:** Client closed connection or network error
+
+**Log:** `"Error reading WebSocket message: {error}"`
+
+**Recovery:** Client should reconnect with new UUID
+</Expandable>
+
+<Expandable title="SSH Write Error">
+**Symptom:** Input commands not executed
+
+**Cause:** SSH stdin closed or SSH connection lost
+
+**Log:** `"Error writing to SSH stdin: {error}"`
+
+**Recovery:** Connection will terminate, client must reconnect
+</Expandable>
+
+<Expandable title="SSH Read Error">
+**Symptom:** No output received
+
+**Cause:** SSH stdout closed or SSH connection lost
+
+**Log:** `"Error reading SSH stdout: {error}"`
+
+**Recovery:** Connection will terminate, client must reconnect
+</Expandable>
+
+<Expandable title="WebSocket Write Error">
+**Symptom:** Server can't send output to client
+
+**Cause:** Client disconnected or network error
+
+**Log:** `"Error writing WebSocket message: {error}"`
+
+**Recovery:** Connection will terminate automatically
+</Expandable>
+
+<Expandable title="JSON Unmarshal Error">
+**Symptom:** Message ignored
+
+**Cause:** Invalid JSON format in client message
+
+**Log:** `"Error unmarshaling message: {error}"`
+
+**Recovery:** Message is skipped, connection continues. Ensure messages are valid JSON.
+</Expandable>
+
+---
+
+## Complete Integration Example
+
+```javascript Full xterm.js Integration
+import { Terminal } from 'xterm';
+import 'xterm/css/xterm.css';
+
+class SSHTerminal {
+  constructor(machineId, password) {
+    this.machineId = machineId;
+    this.password = password;
+    this.terminal = null;
+    this.websocket = null;
+    this.heartbeatInterval = null;
+  }
+
+  async connect(terminalElement) {
+    try {
+      // Step 1: Get UUID from connect endpoint
+      const response = await fetch(`/api/v1/machine/${this.machineId}/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // Include JWT cookie
+        body: JSON.stringify({ password: this.password })
+      });
+
+      const result = await response.json();
+      if (result.status !== 'OK') {
+        throw new Error(result.message);
+      }
+
+      const uuid = result.data;
+
+      // Step 2: Create terminal
+      this.terminal = new Terminal({
+        cursorBlink: true,
+        fontSize: 14,
+        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        theme: {
+          background: '#1e1e1e',
+          foreground: '#d4d4d4'
+        }
+      });
+
+      this.terminal.open(terminalElement);
+
+      // Step 3: Connect WebSocket
+      this.websocket = new WebSocket(`ws://localhost:8080/ssh?uuid=${uuid}`);
+
+      this.websocket.onopen = () => {
+        console.log('SSH WebSocket connected');
+        this.terminal.write('\r\n*** Connected to SSH server ***\r\n\r\n');
+
+        // Start heartbeat
+        this.heartbeatInterval = setInterval(() => {
+          if (this.websocket.readyState === WebSocket.OPEN) {
+            this.websocket.send(JSON.stringify({
+              type: 'heartbeat',
+              data: ''
+            }));
+          }
+        }, 30000);
+      };
+
+      this.websocket.onmessage = (event) => {
+        // Write output to terminal
+        this.terminal.write(event.data);
+      };
+
+      this.websocket.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        this.terminal.write('\r\n*** Connection error ***\r\n');
+      };
+
+      this.websocket.onclose = (event) => {
+        console.log('WebSocket closed:', event.code, event.reason);
+        this.terminal.write('\r\n*** Connection closed ***\r\n');
+        this.cleanup();
+      };
+
+      // Step 4: Handle terminal input
+      this.terminal.onData((data) => {
+        if (this.websocket.readyState === WebSocket.OPEN) {
+          this.websocket.send(JSON.stringify({
+            type: 'input',
+            data: data
+          }));
+        }
+      });
+
+    } catch (error) {
+      console.error('Connection failed:', error);
+      throw error;
+    }
+  }
+
+  disconnect() {
+    if (this.websocket) {
+      this.websocket.close();
+    }
+  }
+
+  cleanup() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+  }
+}
+
+// Usage
+const machineId = '1';
+const password = 'master-password';
+const terminal = new SSHTerminal(machineId, password);
+
+terminal.connect(document.getElementById('terminal'))
+  .then(() => console.log('Connected successfully'))
+  .catch(error => console.error('Connection failed:', error));
+```
+
+---
+
+## Security Considerations
+
+### No JWT Required
+
+The WebSocket endpoint does NOT require JWT authentication. Security is provided by:
+
+1. **Ephemeral UUIDs** - Short-lived connection identifiers
+2. **Time Buckets** - Automatic cleanup of stale connections
+3. **Pre-authentication** - UUID obtained from authenticated connect endpoint
+
+### CORS Policy
+
+The WebSocket upgrader accepts connections from all origins:
+
+```go
+var upgrader = websocket.Upgrader{
+    CheckOrigin: func(r *http.Request) bool {
+        return true
+    },
+}
+```
+
+**Production Recommendation:** Implement origin validation:
+
+```go
+CheckOrigin: func(r *http.Request) bool {
+    origin := r.Header.Get("Origin")
+    return origin == "https://your-domain.com"
+}
+```
+
+### Connection Lifetime
+
+- UUIDs are stored in memory (not persistent)
+- Connections are associated with time buckets
+- Automatic cleanup based on heartbeat activity
+- Server restart invalidates all UUIDs
+
+### Best Practices
+
+1. **Heartbeats** - Send every 30 seconds to prevent timeout
+2. **Error Handling** - Always implement reconnection logic
+3. **Connection Cleanup** - Close WebSocket when user navigates away
+4. **Input Validation** - Sanitize terminal input if needed
+5. **HTTPS/WSS** - Use secure connections in production

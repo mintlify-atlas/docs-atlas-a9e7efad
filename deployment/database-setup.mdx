@@ -1,0 +1,551 @@
+---
+title: Database Setup
+description: PostgreSQL configuration, schema, and migrations for suSHi
+---
+
+## Overview
+
+suSHi uses PostgreSQL as its primary database with automatic migrations powered by [Goose](https://github.com/pressly/goose). The application automatically runs migrations on startup when `MIGRATE_DB=true` is set.
+
+## Database Requirements
+
+- PostgreSQL 12 or later
+- Support for UUID generation (`gen_random_uuid()`)
+- Minimum 100MB storage for initial setup
+- User with CREATE TABLE and CREATE INDEX privileges
+
+## Quick Setup
+
+<Steps>
+  <Step title="Start PostgreSQL">
+    Using Docker Compose (recommended):
+    ```bash
+    docker-compose up -d postgres
+    ```
+    
+    Or install PostgreSQL locally:
+    ```bash
+    # Ubuntu/Debian
+    sudo apt-get install postgresql
+    
+    # macOS
+    brew install postgresql
+    ```
+  </Step>
+
+  <Step title="Configure database connection">
+    Set the required environment variables:
+    ```bash
+    export DB_HOST=localhost
+    export DB_PORT=5432
+    export DB_USER=postgres
+    export DB_PASSWORD=postgres
+    export DB_NAME=sushi
+    export MIGRATE_DB=true
+    ```
+  </Step>
+
+  <Step title="Start the application">
+    The application will automatically create the database schema on first startup:
+    ```bash
+    ./app
+    ```
+    
+    Or with Docker:
+    ```bash
+    docker-compose up -d sushi-backend
+    ```
+  </Step>
+
+  <Step title="Verify database setup">
+    Connect to PostgreSQL and verify tables were created:
+    ```bash
+    psql -h localhost -U postgres -d sushi -c "\dt"
+    ```
+    
+    You should see: `users`, `organizations`, and `machines` tables.
+  </Step>
+</Steps>
+
+## Migration System
+
+### How Migrations Work
+
+suSHi uses Goose for database migrations. The migration system is implemented in `db/migrations.go`:
+
+```go
+func Migrate(config models.Config) error {
+    log.Debug().Msgf("DoMigrations : %v", config.DoMigrations)
+
+    if !config.DoMigrations {
+        log.Debug().Msg("Skipping database migration")
+        return nil
+    }
+
+    log.Debug().Msg("Migrating the database")
+    db, error := sql.Open("postgres", config.DatabaseConfig.String)
+    if error != nil {
+        return error
+    }
+    defer db.Close()
+
+    goose.SetDialect("postgres")
+    err := goose.Up(db, "db/migrations")
+    if err != nil {
+        return err
+    }
+    
+    return nil
+}
+```
+
+### Migration Files
+
+Migrations are stored in the `db/migrations/` directory and are executed in order:
+
+1. `000001_create_tables_users.sql` - Creates the users table
+2. `000002_create_tables_organisations.sql` - Creates the organizations table
+3. `000003_create_tables_machines.sql` - Creates the machines table
+4. `000004_create_dummy_user.sql` - Inserts a test user for development
+
+<Warning>
+  Migrations run automatically when `MIGRATE_DB=true`. Each migration runs only once, tracked by Goose's version table.
+</Warning>
+
+## Database Schema
+
+### Users Table
+
+Stores user accounts with UUID-based identifiers.
+
+```sql
+CREATE TABLE users (
+    username UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    salt VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Fields:**
+
+<ParamField path="username" type="UUID" required>
+  Primary key, auto-generated UUID for each user.
+</ParamField>
+
+<ParamField path="name" type="VARCHAR(255)" required>
+  User's display name.
+</ParamField>
+
+<ParamField path="email" type="VARCHAR(255)" required>
+  User's email address. Must be unique across all users.
+</ParamField>
+
+<ParamField path="salt" type="VARCHAR(255)" required>
+  Cryptographic salt for password hashing or token generation.
+</ParamField>
+
+<ParamField path="created_at" type="TIMESTAMP" default="CURRENT_TIMESTAMP">
+  Timestamp when the user was created.
+</ParamField>
+
+<ParamField path="updated_at" type="TIMESTAMP" default="CURRENT_TIMESTAMP">
+  Timestamp when the user was last updated.
+</ParamField>
+
+**Migration file**: `db/migrations/000001_create_tables_users.sql`
+
+### Organizations Table
+
+Stores organization entities that can own machines.
+
+```sql
+CREATE TABLE organizations (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) UNIQUE NOT NULL,
+    salt VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Fields:**
+
+<ParamField path="id" type="SERIAL" required>
+  Auto-incrementing primary key.
+</ParamField>
+
+<ParamField path="name" type="VARCHAR(255)" required>
+  Organization name. Must be unique across all organizations.
+</ParamField>
+
+<ParamField path="salt" type="VARCHAR(255)" required>
+  Cryptographic salt for organization-specific encryption.
+</ParamField>
+
+<ParamField path="created_at" type="TIMESTAMP" default="CURRENT_TIMESTAMP">
+  Timestamp when the organization was created.
+</ParamField>
+
+<ParamField path="updated_at" type="TIMESTAMP" default="CURRENT_TIMESTAMP">
+  Timestamp when the organization was last updated.
+</ParamField>
+
+**Migration file**: `db/migrations/000002_create_tables_organisations.sql`
+
+### Machines Table
+
+Stores SSH connection information for remote machines with encrypted credentials.
+
+```sql
+CREATE TABLE machines (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    username VARCHAR(100) NOT NULL,
+    hostname VARCHAR(255) NOT NULL,
+    port INTEGER NOT NULL DEFAULT 22,
+    encrypted_private_key TEXT,
+    iv_private_key TEXT,
+    encrypted_passphrase TEXT,
+    iv_passphrase TEXT,
+    owner_id UUID NOT NULL,
+    owner_type VARCHAR(20) NOT NULL CHECK (owner_type IN ('user','organization')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Fields:**
+
+<ParamField path="id" type="SERIAL" required>
+  Auto-incrementing primary key.
+</ParamField>
+
+<ParamField path="name" type="VARCHAR(100)" required>
+  Display name for the machine.
+</ParamField>
+
+<ParamField path="username" type="VARCHAR(100)" required>
+  SSH username for connecting to the machine.
+</ParamField>
+
+<ParamField path="hostname" type="VARCHAR(255)" required>
+  Machine hostname or IP address.
+</ParamField>
+
+<ParamField path="port" type="INTEGER" default="22">
+  SSH port number.
+</ParamField>
+
+<ParamField path="encrypted_private_key" type="TEXT">
+  Encrypted SSH private key for authentication.
+</ParamField>
+
+<ParamField path="iv_private_key" type="TEXT">
+  Initialization vector for private key encryption.
+</ParamField>
+
+<ParamField path="encrypted_passphrase" type="TEXT">
+  Encrypted passphrase if the private key is passphrase-protected.
+</ParamField>
+
+<ParamField path="iv_passphrase" type="TEXT">
+  Initialization vector for passphrase encryption.
+</ParamField>
+
+<ParamField path="owner_id" type="UUID" required>
+  UUID of the owner (user or organization).
+</ParamField>
+
+<ParamField path="owner_type" type="VARCHAR(20)" required>
+  Type of owner: `user` or `organization`. Constrained by CHECK constraint.
+</ParamField>
+
+<ParamField path="created_at" type="TIMESTAMP WITH TIME ZONE" default="CURRENT_TIMESTAMP">
+  Timestamp when the machine was added.
+</ParamField>
+
+<ParamField path="updated_at" type="TIMESTAMP WITH TIME ZONE" default="CURRENT_TIMESTAMP">
+  Timestamp when the machine was last updated.
+</ParamField>
+
+**Migration file**: `db/migrations/000003_create_tables_machines.sql`
+
+<Warning>
+  SSH credentials are encrypted before storage. The `encrypted_private_key` and `encrypted_passphrase` fields store sensitive data securely.
+</Warning>
+
+## Initial Data
+
+### Dummy User
+
+For development and testing, a dummy user is automatically created:
+
+```sql
+INSERT INTO users (username, name, email, salt)
+VALUES (
+    '6b338158-32ca-4b53-a273-f54e3244697e',
+    'Dummy User',
+    'dummy@example.com',
+    'randomsalt123456789'
+);
+```
+
+**Migration file**: `db/migrations/000004_create_dummy_user.sql`
+
+<Warning>
+  Remove or disable this migration in production by editing or deleting `000004_create_dummy_user.sql` before deployment.
+</Warning>
+
+## Manual Database Operations
+
+### Connect to Database
+
+<CodeGroup>
+```bash Docker Compose
+docker exec -it postgres psql -U postgres -d sushi
+```
+
+```bash Local Installation
+psql -h localhost -U postgres -d sushi
+```
+</CodeGroup>
+
+### View Tables
+
+```sql
+-- List all tables
+\dt
+
+-- Describe a specific table
+\d users
+\d organizations
+\d machines
+```
+
+### Check Migration Status
+
+Goose maintains a version table to track applied migrations:
+
+```sql
+SELECT * FROM goose_db_version;
+```
+
+This shows which migrations have been applied and when.
+
+### Query Data
+
+<CodeGroup>
+```sql View all users
+SELECT username, name, email, created_at FROM users;
+```
+
+```sql View all organizations
+SELECT id, name, created_at FROM organizations;
+```
+
+```sql View machines with owners
+SELECT 
+    m.id,
+    m.name,
+    m.hostname,
+    m.port,
+    m.owner_type,
+    CASE 
+        WHEN m.owner_type = 'user' THEN u.name
+        WHEN m.owner_type = 'organization' THEN o.name
+    END AS owner_name
+FROM machines m
+LEFT JOIN users u ON m.owner_id = u.username AND m.owner_type = 'user'
+LEFT JOIN organizations o ON m.owner_id::text = o.id::text AND m.owner_type = 'organization';
+```
+</CodeGroup>
+
+## Backup and Restore
+
+### Backup Database
+
+<CodeGroup>
+```bash Full backup
+pg_dump -h localhost -U postgres -d sushi > sushi_backup.sql
+```
+
+```bash Backup with Docker
+docker exec postgres pg_dump -U postgres sushi > sushi_backup.sql
+```
+
+```bash Schema only
+pg_dump -h localhost -U postgres -d sushi --schema-only > sushi_schema.sql
+```
+
+```bash Data only
+pg_dump -h localhost -U postgres -d sushi --data-only > sushi_data.sql
+```
+</CodeGroup>
+
+### Restore Database
+
+<CodeGroup>
+```bash Full restore
+psql -h localhost -U postgres -d sushi < sushi_backup.sql
+```
+
+```bash Restore with Docker
+docker exec -i postgres psql -U postgres -d sushi < sushi_backup.sql
+```
+</CodeGroup>
+
+<Warning>
+  Always test your backup restoration process in a non-production environment.
+</Warning>
+
+## Managing Migrations
+
+### Disable Automatic Migrations
+
+To prevent migrations from running automatically:
+
+```bash
+export MIGRATE_DB=false
+```
+
+Or in `docker-compose.yaml`:
+
+```yaml
+environment:
+  - MIGRATE_DB=false
+```
+
+### Run Migrations Manually
+
+If you prefer to run migrations manually, you can use Goose directly:
+
+<Steps>
+  <Step title="Install Goose">
+    ```bash
+    go install github.com/pressly/goose/v3/cmd/goose@latest
+    ```
+  </Step>
+
+  <Step title="Run migrations">
+    ```bash
+    goose -dir db/migrations postgres "host=localhost port=5432 user=postgres password=postgres dbname=sushi sslmode=disable" up
+    ```
+  </Step>
+
+  <Step title="Check status">
+    ```bash
+    goose -dir db/migrations postgres "host=localhost port=5432 user=postgres password=postgres dbname=sushi sslmode=disable" status
+    ```
+  </Step>
+</Steps>
+
+### Create New Migration
+
+To add a new migration:
+
+```bash
+goose -dir db/migrations create your_migration_name sql
+```
+
+This creates a new file: `db/migrations/YYYYMMDDHHMMSS_your_migration_name.sql`
+
+Edit the file with your SQL:
+
+```sql
+-- +goose Up
+-- Add your schema changes here
+CREATE TABLE new_table (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255)
+);
+
+-- +goose Down
+-- Add rollback logic here
+DROP TABLE IF EXISTS new_table;
+```
+
+## Production Considerations
+
+### Database Security
+
+1. **Use strong passwords**: Change default PostgreSQL passwords
+2. **Limit network access**: Use firewall rules to restrict database access
+3. **Enable SSL/TLS**: Configure PostgreSQL to use encrypted connections
+4. **Regular backups**: Implement automated backup schedules
+5. **Monitor disk space**: Ensure adequate storage for growth
+
+### Performance Optimization
+
+```sql
+-- Add indexes for common queries
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_machines_owner ON machines(owner_id, owner_type);
+CREATE INDEX idx_organizations_name ON organizations(name);
+```
+
+### Connection Pooling
+
+suSHi uses `pgxpool` for connection pooling (from `models/config.go`):
+
+```go
+type Config struct {
+    DB *pgxpool.Pool  // Connection pool
+    // ...
+}
+```
+
+The connection pool is configured automatically based on your database settings.
+
+## Troubleshooting
+
+### Migration Failures
+
+**Error: "migration failed"**
+
+Check the application logs for specific SQL errors:
+
+```bash
+docker-compose logs sushi-backend | grep -i migration
+```
+
+**Error: "relation already exists"**
+
+The migration may have partially completed. Check the `goose_db_version` table:
+
+```sql
+SELECT * FROM goose_db_version;
+```
+
+To fix, manually mark the migration as complete or roll back and retry.
+
+### Connection Issues
+
+**Error: "connection refused"**
+
+- Verify PostgreSQL is running: `docker-compose ps postgres`
+- Check database host and port in environment variables
+- Ensure firewall allows connections on port 5432
+
+**Error: "authentication failed"**
+
+- Verify database credentials match between `docker-compose.yaml` postgres service and sushi-backend service
+- Check PostgreSQL logs: `docker-compose logs postgres`
+
+### Data Issues
+
+**UUID generation not working**
+
+Ensure your PostgreSQL version supports `gen_random_uuid()` (PostgreSQL 13+) or install the `pgcrypto` extension:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+```
+
+## Next Steps
+
+- Configure [Environment Variables](/deployment/environment-config)
+- Set up [Docker Deployment](/deployment/docker-setup)
+- Learn about the API endpoints in the API Reference

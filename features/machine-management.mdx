@@ -1,0 +1,471 @@
+---
+title: Machine Management
+description: Add, view, update, and delete SSH machines in your suSHi workspace
+---
+
+## Overview
+
+suSHi allows you to centrally manage all your SSH machines in one place. Store connection details securely, organize machines by purpose, and connect with a single click.
+
+## Machine Properties
+
+Each machine in suSHi stores the following information:
+
+<Tabs>
+  <Tab title="Basic Information">
+    **Required fields:**
+    
+    - **Name**: Friendly identifier for the machine (e.g., "Production Server")
+    - **Hostname**: IP address or domain name (e.g., `192.168.1.100` or `server.example.com`)
+    - **Port**: SSH port number (typically `22`)
+    - **Username**: SSH login username
+  </Tab>
+  
+  <Tab title="Authentication">
+    **Choose one method:**
+    
+    - **Private Key**: SSH private key (RSA, ECDSA, Ed25519)
+      - Optional passphrase for encrypted keys
+      - Stored encrypted with AES-256
+    
+    - **Password**: SSH password authentication
+      - Encrypted with your master password
+      - Required on each connection for decryption
+  </Tab>
+  
+  <Tab title="Organization">
+    **Optional metadata:**
+    
+    - **Organization**: Group machines by team, project, or client
+    - Helps organize large machine inventories
+    - Filter and search by organization
+  </Tab>
+</Tabs>
+
+<Info>
+All sensitive data (private keys, passphrases, passwords) is encrypted using AES-256-CFB before storage. See [Security](/features/security) for details.
+</Info>
+
+## Adding a Machine
+
+### Via Dashboard
+
+<Steps>
+  <Step title="Navigate to Machines">
+    Click on **Machines** in the main navigation menu
+  </Step>
+  
+  <Step title="Click Add Machine">
+    Click the **Add New Machine** button in the top right
+  </Step>
+  
+  <Step title="Fill Basic Details">
+    Enter the machine's name, hostname, port, and username
+  </Step>
+  
+  <Step title="Configure Authentication">
+    Choose between private key or password authentication:
+    
+    - For **private key**: Paste your private key content
+    - For **password**: This will be requested during connection
+    
+    <Warning>
+    Private keys are stored encrypted. Passwords are requested at connection time for maximum security.
+    </Warning>
+  </Step>
+  
+  <Step title="Add Organization (Optional)">
+    Group the machine under an organization for better organization
+  </Step>
+  
+  <Step title="Save Machine">
+    Click **Save** to add the machine to your workspace
+  </Step>
+</Steps>
+
+### API Request
+
+You can also add machines programmatically:
+
+```bash
+curl -X POST https://your-domain.com/api/machines \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Production Server",
+    "hostname": "192.168.1.100",
+    "port": "22",
+    "username": "admin",
+    "private_key": "-----BEGIN RSA PRIVATE KEY-----\n...",
+    "passphrase": "key-passphrase",
+    "organization": "Production"
+  }'
+```
+
+<Accordion title="API Response">
+```json
+{
+  "status": 200,
+  "message": "Machine created successfully",
+  "data": null
+}
+```
+</Accordion>
+
+## Viewing Machines
+
+### Machine List
+
+The machine dashboard shows all your machines with:
+
+- Machine name and hostname
+- Username and port
+- Organization (if set)
+- Quick action buttons (Connect, Edit, Delete)
+
+<Note>
+Only basic information is displayed in the list view. Sensitive credentials are never shown in the UI.
+</Note>
+
+### Machine Details
+
+Click on any machine to view detailed information:
+
+```json
+// Example machine object returned by API
+{
+  "id": 1,
+  "name": "Production Server",
+  "hostname": "192.168.1.100",
+  "port": "22",
+  "username": "admin",
+  "owner_id": "user@example.com",
+  "owner_type": "user",
+  // Sensitive fields (private_key, passphrase) are excluded
+}
+```
+
+### Filtering and Search
+
+Organize your machines:
+
+- **Search by name**: Find machines quickly
+- **Filter by organization**: View machines by team or project
+- **Sort by date**: See recently added or modified machines
+
+## Connecting to Machines
+
+To establish an SSH session:
+
+<Steps>
+  <Step title="Select Machine">
+    Find the machine you want to connect to in your dashboard
+  </Step>
+  
+  <Step title="Click Connect">
+    Click the **Connect** button on the machine card
+  </Step>
+  
+  <Step title="Enter Encryption Password">
+    Provide your master password to decrypt stored credentials:
+    
+    ```json
+    {
+      "password": "your-master-password"
+    }
+    ```
+  </Step>
+  
+  <Step title="Connection Established">
+    Server decrypts credentials and establishes SSH connection
+  </Step>
+  
+  <Step title="Terminal Opens">
+    You're redirected to the web terminal with active SSH session
+  </Step>
+</Steps>
+
+### Connection Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant B as Browser
+    participant S as suSHi Server
+    participant M as Remote Machine
+    
+    U->>B: Click Connect
+    B->>U: Prompt for password
+    U->>B: Enter master password
+    B->>S: POST /api/machines/:id/connect
+    S->>S: Decrypt credentials
+    S->>M: Establish SSH connection
+    M->>S: Connection established
+    S->>S: Generate session UUID
+    S->>B: Return UUID
+    B->>B: Redirect to terminal?uuid=...
+    B->>S: WebSocket connection
+    S->>M: Start SSH session
+    U->>M: Execute commands
+```
+
+<Info>
+The connection process uses your master password to decrypt stored credentials, then establishes a fresh SSH connection to the machine.
+</Info>
+
+## Deleting Machines
+
+<Warning>
+**Deletion is permanent!** This action cannot be undone. All stored credentials for the machine will be permanently deleted.
+</Warning>
+
+### Delete via Dashboard
+
+1. Find the machine in your list
+2. Click the **Delete** button (trash icon)
+3. Confirm deletion when prompted
+
+### Delete via API
+
+```bash
+curl -X DELETE https://your-domain.com/api/machines/:id \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "status": 200,
+  "message": "Machine deleted successfully",
+  "data": null
+}
+```
+
+## Security Considerations
+
+<CardGroup cols={2}>
+  <Card title="Credential Encryption" icon="lock">
+    All private keys and passphrases are encrypted with AES-256-CFB using PBKDF2 key derivation.
+  </Card>
+  
+  <Card title="Password Protection" icon="key">
+    Your master password is never stored. It's required to decrypt credentials at connection time.
+  </Card>
+  
+  <Card title="User Isolation" icon="users">
+    You can only access machines you own. JWT authentication ensures proper authorization.
+  </Card>
+  
+  <Card title="Audit Trail" icon="list">
+    All machine operations (create, connect, delete) are logged for security auditing.
+  </Card>
+</CardGroup>
+
+## Machine Ownership
+
+Machines are owned by users or organizations:
+
+```go
+// Machine ownership model
+type FilterMachine struct {
+    ID         int    `json:"id"`
+    Name       string `json:"name"`
+    Username   string `json:"username"`
+    Hostname   string `json:"hostname"`
+    Port       string `json:"port"`
+    OwnerID    string `json:"owner_id"`    // User email or org ID
+    OwnerType  string `json:"owner_type"`  // "user" or "organization"
+}
+```
+
+**Owner Types:**
+
+- **`user`**: Personal machines (default)
+- **`organization`**: Shared team machines (future feature)
+
+<Note>
+Currently, all machines are user-owned. Organization-level sharing is planned for future releases.
+</Note>
+
+## API Reference
+
+### Create Machine
+
+**Endpoint:** `POST /api/machines`
+
+**Request Body:**
+```json
+{
+  "name": "string",
+  "hostname": "string",
+  "port": "string",
+  "username": "string",
+  "private_key": "string",     // Optional
+  "passphrase": "string",      // Optional
+  "password": "string",        // Optional
+  "organization": "string"     // Optional
+}
+```
+
+### Get All Machines
+
+**Endpoint:** `GET /api/machines`
+
+**Response:**
+```json
+{
+  "status": 200,
+  "message": "Machines fetched successfully",
+  "data": [
+    {
+      "id": 1,
+      "name": "Production Server",
+      "hostname": "192.168.1.100",
+      "port": "22",
+      "username": "admin",
+      "owner_id": "user@example.com",
+      "owner_type": "user"
+    }
+  ]
+}
+```
+
+### Get Single Machine
+
+**Endpoint:** `GET /api/machines/:id`
+
+**Response:** Same as individual machine object above
+
+### Connect to Machine
+
+**Endpoint:** `POST /api/machines/:id/connect`
+
+**Request Body:**
+```json
+{
+  "password": "your-master-password"
+}
+```
+
+**Response:**
+```json
+{
+  "status": 200,
+  "message": "Connected to machine successfully",
+  "data": "550e8400-e29b-41d4-a716-446655440000"  // Session UUID
+}
+```
+
+### Delete Machine
+
+**Endpoint:** `DELETE /api/machines/:id`
+
+**Response:**
+```json
+{
+  "status": 200,
+  "message": "Machine deleted successfully",
+  "data": null
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use SSH Keys Over Passwords">
+    SSH keys are more secure than passwords and support additional encryption with passphrases.
+    
+    **Generate a key pair:**
+    ```bash
+    ssh-keygen -t ed25519 -C "your-email@example.com"
+    ```
+    
+    Then copy the private key content to suSHi.
+  </Accordion>
+  
+  <Accordion title="Organize with Meaningful Names">
+    Use descriptive names that help you identify machines quickly:
+    
+    - Good: "Production API Server", "Dev Database"
+    - Bad: "Server1", "Machine2"
+    
+    Include environment and purpose for clarity.
+  </Accordion>
+  
+  <Accordion title="Group by Organization">
+    Use the organization field to group related machines:
+    
+    - "Production"
+    - "Staging"
+    - "Client: Acme Corp"
+    - "Personal Projects"
+  </Accordion>
+  
+  <Accordion title="Regular Credential Rotation">
+    Periodically update SSH keys and passwords:
+    
+    1. Generate new credentials on remote machines
+    2. Update machine entries in suSHi
+    3. Remove old credentials
+    
+    This limits exposure from compromised credentials.
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Cannot connect to machine">
+    **Common causes:**
+    
+    - Incorrect hostname or port
+    - Firewall blocking SSH traffic
+    - Wrong username or credentials
+    - Machine is offline
+    
+    **Solutions:**
+    
+    1. Verify machine is reachable: `ping hostname`
+    2. Test SSH directly: `ssh username@hostname -p port`
+    3. Check firewall rules on remote machine
+    4. Verify credentials are correct
+  </Accordion>
+  
+  <Accordion title="Authentication failed">
+    **Common causes:**
+    
+    - Wrong master password for decryption
+    - Private key doesn't match authorized_keys
+    - Key passphrase incorrect
+    
+    **Solutions:**
+    
+    1. Double-check your master password
+    2. Verify the private key matches public key on remote
+    3. Test key locally: `ssh -i private_key username@hostname`
+    4. Check remote machine's `/var/log/auth.log` for details
+  </Accordion>
+  
+  <Accordion title="Machine not found in database">
+    **Cause:** Machine ID doesn't exist or you don't have permission
+    
+    **Solutions:**
+    
+    - Verify the machine ID is correct
+    - Check that you're logged in with the right account
+    - The machine may have been deleted
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Web Terminal" icon="terminal" href="/features/web-terminal">
+    Learn how to use the browser-based terminal
+  </Card>
+  
+  <Card title="Security" icon="shield" href="/features/security">
+    Understand how credentials are encrypted and protected
+  </Card>
+</CardGroup>

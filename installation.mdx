@@ -1,0 +1,360 @@
+---
+title: "Installation"
+description: "Complete Docker installation guide with environment configuration for suSHi"
+---
+
+## Docker installation
+
+suSHi runs as a containerized application using Docker Compose, orchestrating a PostgreSQL database and the suSHi backend service.
+
+## Prerequisites
+
+- Docker Engine 20.10 or later
+- Docker Compose v2.0 or later
+- At least 512MB of available RAM
+- Port 8080 available (or customize the port)
+
+## Installation steps
+
+<Steps>
+  <Step title="Create the project directory">
+    Set up your project structure:
+    
+    ```bash
+    mkdir sushi-app
+    cd sushi-app
+    ```
+  </Step>
+  
+  <Step title="Configure database directory">
+    Create the PostgreSQL data directory with proper permissions:
+    
+    ```bash
+    mkdir -p db/data
+    sudo chown -R 1001:1001 ./db/data
+    ```
+    
+    <Note>
+      The Bitnami PostgreSQL image runs as user ID 1001. Setting these permissions prevents database initialization errors.
+    </Note>
+  </Step>
+  
+  <Step title="Create docker-compose.yaml">
+    Create a `docker-compose.yaml` file with the following configuration:
+    
+    ```yaml docker-compose.yaml
+    version: '3.8'
+    
+    services:
+      postgres:
+        image: bitnami/postgresql
+        container_name: postgres
+        ports:
+          - "5432:5432"
+        environment:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sushi
+        volumes:
+          - ./db/data:/bitnami/postgresql/data
+        restart: always
+      
+      sushi-backend:
+        image: breeze5690/sushi-backend-prod:v1
+        ports:
+          - "8080:8080"
+        environment:
+          - SERVER_PORT=8080
+          - LOG_LEVEL=Debug
+          - JWT_SECRET=secret123
+          - DB_HOST=postgres
+          - DB_PORT=5432
+          - DB_USER=postgres
+          - DB_PASSWORD=postgres
+          - DB_NAME=sushi
+          - MIGRATE_DB=true
+          - GOOGLE_CLIENT_ID=
+          - GOOGLE_CLIENT_SECRET=
+          - GOOGLE_REDIRECT_URL=http://localhost:8080/api/v1/auth/callback
+          - GITHUB_CLIENT_ID=
+          - GITHUB_CLIENT_SECRET=
+          - GITHUB_REDIRECT_URL=http://localhost:8080/api/v1/auth/callback
+        depends_on:
+          - postgres
+        restart: always
+    ```
+  </Step>
+  
+  <Step title="Start the services">
+    Launch suSHi with Docker Compose:
+    
+    ```bash
+    docker compose up -d
+    ```
+    
+    Verify the services are running:
+    
+    ```bash
+    docker compose ps
+    ```
+    
+    Both `postgres` and `sushi-backend` should show as "running".
+  </Step>
+  
+  <Step title="Verify installation">
+    Check the application logs:
+    
+    ```bash
+    docker compose logs -f sushi-backend
+    ```
+    
+    Look for:
+    ```
+    Configuration loaded successfully
+    Starting server on port 8080
+    ```
+    
+    Access the web interface at `http://localhost:8080`
+  </Step>
+</Steps>
+
+## Environment variables
+
+Configure suSHi by modifying these environment variables in the `sushi-backend` service:
+
+### Server configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SERVER_PORT` | `8080` | Port the HTTP server listens on |
+| `LOG_LEVEL` | `Debug` | Logging level: `Debug` or `Info` |
+| `JWT_SECRET` | `secret123` | Secret key for JWT token generation |
+
+<Warning>
+  **Security**: Change `JWT_SECRET` to a strong, randomly generated string in production. This secret is used to sign authentication tokens.
+</Warning>
+
+### Database configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_HOST` | `postgres` | Database host (use service name for Docker) |
+| `DB_PORT` | `5432` | PostgreSQL port |
+| `DB_USER` | `postgres` | Database username |
+| `DB_PASSWORD` | `postgres` | Database password |
+| `DB_NAME` | `sushi` | Database name |
+| `MIGRATE_DB` | `true` | Automatically run database migrations on startup |
+
+<Note>
+  The database configuration should match the PostgreSQL service environment variables.
+</Note>
+
+### OAuth configuration
+
+suSHi supports authentication via Google and GitHub OAuth:
+
+#### Google OAuth
+
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_CLIENT_ID` | OAuth 2.0 Client ID from Google Cloud Console |
+| `GOOGLE_CLIENT_SECRET` | OAuth 2.0 Client Secret |
+| `GOOGLE_REDIRECT_URL` | Callback URL: `http://your-domain:8080/api/v1/auth/callback` |
+
+<Steps>
+  <Step title="Create OAuth credentials">
+    1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+    2. Create a new project or select an existing one
+    3. Navigate to **APIs & Services** > **Credentials**
+    4. Click **Create Credentials** > **OAuth 2.0 Client ID**
+    5. Choose **Web application**
+  </Step>
+  
+  <Step title="Configure authorized redirect URIs">
+    Add your callback URL:
+    ```
+    http://localhost:8080/api/v1/auth/callback
+    ```
+    
+    For production, use your domain:
+    ```
+    https://your-domain.com/api/v1/auth/callback
+    ```
+  </Step>
+  
+  <Step title="Copy credentials">
+    Copy the **Client ID** and **Client Secret** to your `docker-compose.yaml`
+  </Step>
+</Steps>
+
+#### GitHub OAuth
+
+| Variable | Description |
+|----------|-------------|
+| `GITHUB_CLIENT_ID` | OAuth App Client ID from GitHub |
+| `GITHUB_CLIENT_SECRET` | OAuth App Client Secret |
+| `GITHUB_REDIRECT_URL` | Callback URL: `http://your-domain:8080/api/v1/auth/callback` |
+
+<Steps>
+  <Step title="Register OAuth App">
+    1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
+    2. Click **New OAuth App**
+    3. Fill in the application details
+  </Step>
+  
+  <Step title="Set authorization callback URL">
+    ```
+    http://localhost:8080/api/v1/auth/callback
+    ```
+  </Step>
+  
+  <Step title="Generate client secret">
+    After creating the app, generate a new client secret and copy both the Client ID and Client Secret to your configuration.
+  </Step>
+</Steps>
+
+<Note>
+  OAuth is optional for development but recommended for production deployments to secure access to your suSHi instance.
+</Note>
+
+## Advanced configuration
+
+### Custom ports
+
+To run suSHi on a different port, update the port mapping:
+
+```yaml docker-compose.yaml
+services:
+  sushi-backend:
+    ports:
+      - "3000:8080"  # Access on port 3000
+```
+
+<Note>
+  Update OAuth redirect URLs if you change the port.
+</Note>
+
+### Persistent logs
+
+To persist application logs, add a volume mount:
+
+```yaml docker-compose.yaml
+services:
+  sushi-backend:
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - LOG_PATH=/app/logs
+```
+
+### Production considerations
+
+<Warning>
+  **Security checklist for production:**
+  - Change `JWT_SECRET` to a strong random string
+  - Use strong PostgreSQL credentials
+  - Configure OAuth for authentication
+  - Use HTTPS/TLS with `wss://` for WebSocket connections
+  - Set `LOG_LEVEL=Info` to reduce log verbosity
+  - Implement regular database backups
+  - Use secrets management instead of environment variables in compose file
+</Warning>
+
+## Managing the installation
+
+### View logs
+
+<CodeGroup>
+```bash All services
+docker compose logs -f
+```
+
+```bash Backend only
+docker compose logs -f sushi-backend
+```
+
+```bash Database only
+docker compose logs -f postgres
+```
+</CodeGroup>
+
+### Restart services
+
+```bash
+docker compose restart
+```
+
+### Stop services
+
+```bash
+docker compose down
+```
+
+### Update to latest version
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+### Remove all data
+
+<Warning>
+  This will delete all your machine configurations and connection data.
+</Warning>
+
+```bash
+docker compose down -v
+sudo rm -rf db/data
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Database connection failed">
+    Ensure PostgreSQL is running and healthy:
+    
+    ```bash
+    docker compose ps postgres
+    docker compose logs postgres
+    ```
+    
+    Check that database credentials match between services.
+  </Accordion>
+  
+  <Accordion title="Permission denied on db/data">
+    Fix directory permissions:
+    
+    ```bash
+    sudo chown -R 1001:1001 ./db/data
+    ```
+  </Accordion>
+  
+  <Accordion title="Port already in use">
+    Check what's using the port:
+    
+    ```bash
+    sudo lsof -i :8080
+    ```
+    
+    Either stop the conflicting service or change suSHi's port in `docker-compose.yaml`.
+  </Accordion>
+  
+  <Accordion title="WebSocket connection issues">
+    For local development, you may need to use `ws://` instead of `wss://`. This is a known issue documented in the source.
+    
+    In production, ensure you're using HTTPS and `wss://` protocol.
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart guide" icon="rocket" href="/quickstart">
+    Connect to your first machine via SSH through the browser.
+  </Card>
+  
+  <Card title="Configuration reference" icon="book">
+    Explore all available configuration options.
+  </Card>
+</CardGroup>

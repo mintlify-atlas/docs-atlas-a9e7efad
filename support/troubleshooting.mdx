@@ -1,0 +1,386 @@
+---
+title: Troubleshooting
+description: Common issues and solutions for SuSHi deployment and operation
+---
+
+## WebSocket Connection Issues
+
+### Connection Closed Error
+
+<Warning>
+If you encounter "connection closed" errors when opening a terminal, this is typically related to WebSocket protocol mismatch.
+</Warning>
+
+**Solution:**
+
+In `static/terminal.html` (line 95), change the WebSocket protocol from `wss://` to `ws://` if you're running the application without SSL/TLS:
+
+```javascript
+// Change from:
+const ws = new WebSocket('wss://localhost:8080/ws');
+
+// To:
+const ws = new WebSocket('ws://localhost:8080/ws');
+```
+
+<Info>
+Use `wss://` (secure WebSocket) only when running behind HTTPS. For local development with HTTP, use `ws://`.
+</Info>
+
+### WebSocket Upgrade Failed
+
+If the WebSocket upgrade fails, check the following:
+
+1. Ensure the server is accepting WebSocket connections on the correct port
+2. Verify CORS settings allow your origin (controllers/ssh.go:22)
+3. Check that the UUID parameter is being passed correctly in the WebSocket URL
+
+**Error Message:**
+```
+Error upgrading to WebSocket: [error details]
+```
+
+**Resolution:**
+- Verify the `CheckOrigin` function in the WebSocket upgrader is configured correctly
+- Ensure your reverse proxy (if any) is configured to pass WebSocket upgrade headers
+
+---
+
+## Deployment Issues
+
+### Database Connection Failed
+
+<Warning>
+Common error: "Failed to connect to database" or "Connection refused on port 5432"
+</Warning>
+
+**Solution:**
+
+1. **Verify PostgreSQL is running:**
+   ```bash
+   docker ps | grep postgres
+   ```
+
+2. **Check database permissions:**
+   ```bash
+   sudo chown -R 1001:1001 ./db/data
+   ```
+
+3. **Verify environment variables in docker-compose.yaml:**
+   ```yaml
+   environment:
+     - DB_HOST=postgres
+     - DB_PORT=5432
+     - DB_USER=postgres
+     - DB_PASSWORD=postgres
+     - DB_NAME=sushi
+   ```
+
+<Note>
+The database must be created before the application starts. Set `MIGRATE_DB=true` to automatically run migrations.
+</Note>
+
+### Port Already in Use
+
+**Error Message:**
+```
+Error starting server: bind: address already in use
+```
+
+**Solution:**
+
+1. Find the process using port 8080:
+   ```bash
+   lsof -i :8080
+   ```
+
+2. Kill the process or change the port in docker-compose.yaml:
+   ```yaml
+   ports:
+     - "3000:8080"  # Maps container port 8080 to host port 3000
+   ```
+
+### Volume Permissions
+
+**Issue:** PostgreSQL container fails to start with permission errors
+
+**Solution:**
+
+Ensure proper permissions before running `docker compose up`:
+
+```bash
+mkdir -p db/data
+sudo chown -R 1001:1001 ./db/data
+```
+
+---
+
+## Authentication Errors
+
+### OAuth Callback Failed
+
+<Warning>
+Error: "Missing query param 'state'" or "Missing query param 'code'"
+</Warning>
+
+**Common Causes:**
+
+1. **Missing OAuth Configuration:**
+   - Ensure `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set in docker-compose.yaml
+   - Ensure `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are set in docker-compose.yaml
+
+2. **Incorrect Redirect URL:**
+   - OAuth redirect URL must match exactly: `http://localhost:8080/api/v1/auth/callback`
+   - Update in your OAuth provider's console (Google/GitHub)
+
+3. **Invalid State Parameter:**
+   - The state parameter must match between the authorization request and callback
+   - Check that state is being properly generated and validated (controllers/oauth.go:60)
+
+### JWT Token Issues
+
+**Error:** "Error generating JWT token" or "Invalid token"
+
+**Solution:**
+
+1. Verify `JWT_SECRET` is set in environment variables:
+   ```yaml
+   environment:
+     - JWT_SECRET=your_secure_secret_here
+   ```
+
+2. Check cookie settings in production:
+   - Set `HttpOnly: true` for security
+   - Set `Secure: true` when using HTTPS
+   - Ensure `SameSite` is configured correctly
+
+<Note>
+By default, cookies are set with `HttpOnly: false` and `Secure: false` for development. Change these in production (controllers/oauth.go:121).
+</Note>
+
+### User Not Found
+
+**Error:** "Error fetching username from database"
+
+**Solution:**
+
+This occurs when OAuth succeeds but user creation fails. Check:
+
+1. Database connection is active
+2. User table exists (run migrations with `MIGRATE_DB=true`)
+3. Username/email is properly stored during OAuth callback
+
+---
+
+## SSH Connection Problems
+
+### Failed to Parse Private Key
+
+<Warning>
+Error: "Failed to parse private key" when connecting to a machine
+</Warning>
+
+**Common Causes:**
+
+1. **Invalid Private Key Format:**
+   - Ensure the private key is in OpenSSH format
+   - Check for extra whitespace or line breaks
+
+2. **Passphrase Issues:**
+   - If the key has a passphrase, it must be provided during connection
+   - Empty passphrase field when key requires one will cause failure
+
+**Solution:**
+
+Verify your private key format:
+```bash
+# OpenSSH format (correct)
+-----BEGIN OPENSSH PRIVATE KEY-----
+...
+-----END OPENSSH PRIVATE KEY-----
+
+# Or RSA format (also supported)
+-----BEGIN RSA PRIVATE KEY-----
+...
+-----END RSA PRIVATE KEY-----
+```
+
+### Failed to Create Session
+
+**Error Message:**
+```
+Failed to create session: [error details]
+```
+
+**Solution:**
+
+1. Verify the SSH connection was established successfully
+2. Check that the remote server allows session creation
+3. Ensure proper terminal allocation settings (controllers/ssh.go:109)
+
+### Connection Timeout
+
+**Issue:** SSH connection times out when attempting to connect to a machine
+
+**Checklist:**
+
+1. Verify the hostname and port are correct
+2. Ensure the target machine is reachable:
+   ```bash
+   ping <hostname>
+   telnet <hostname> <port>
+   ```
+3. Check firewall rules allow SSH connections
+4. Verify SSH service is running on the target machine
+
+---
+
+## Encryption and Security Issues
+
+### Decryption Failed
+
+<Warning>
+Error: "Error decoding base64 ciphertext" or decryption errors
+</Warning>
+
+**Causes:**
+
+1. **Password Mismatch:**
+   - The decryption password doesn't match the encryption password
+   - Stored in database, used to encrypt/decrypt private keys
+
+2. **Corrupted Data:**
+   - IV (Initialization Vector) or ciphertext was corrupted
+   - Database encoding issue
+
+**Technical Details:**
+
+Private keys are encrypted using:
+- Algorithm: AES-CFB
+- Key derivation: PBKDF2-HMAC-SHA256 (10,000 iterations)
+- Unique salt and IV per encryption operation
+
+<Info>
+If you forget the password used to encrypt a private key, it cannot be recovered. You'll need to delete and re-add the machine.
+</Info>
+
+---
+
+## Performance Issues
+
+### Slow Terminal Response
+
+**Symptoms:**
+- Delayed keystrokes in the web terminal
+- Laggy terminal output
+
+**Solutions:**
+
+1. **Check Network Latency:**
+   - WebSocket connections are affected by network latency
+   - Test connection to the SuSHi server and target machine
+
+2. **Terminal Buffer Settings:**
+   - Adjust buffer size in controllers/ssh.go:150 (default: 1024 bytes)
+   - Larger buffers reduce message frequency but increase latency
+
+3. **Heartbeat Configuration:**
+   - Heartbeat messages keep connections alive (controllers/ssh.go:134)
+   - Adjust frequency if experiencing timeouts
+
+### High Memory Usage
+
+**Issue:** Backend consuming excessive memory
+
+**Solutions:**
+
+1. Monitor active SSH connections
+2. Check for connection leaks in the connection map
+3. Ensure sessions are properly closed when terminals disconnect
+4. Review log level (set to `Info` or `Warning` in production instead of `Debug`)
+
+---
+
+## Docker and Container Issues
+
+### Container Fails to Start
+
+**Check logs:**
+```bash
+docker logs sushi-backend
+docker logs postgres
+```
+
+**Common Issues:**
+
+1. Missing environment variables
+2. Database not ready when backend starts
+3. Port conflicts
+4. Volume permission issues
+
+### Database Data Persistence
+
+**Issue:** Data lost after container restart
+
+**Solution:**
+
+Ensure volume is properly mounted in docker-compose.yaml:
+```yaml
+volumes:
+  - ./db/data:/bitnami/postgresql/data
+```
+
+Verify the directory exists and has correct permissions before starting containers.
+
+---
+
+## Logging and Debugging
+
+### Enable Debug Logging
+
+Set the log level to Debug in docker-compose.yaml:
+
+```yaml
+environment:
+  - LOG_LEVEL=Debug
+```
+
+<Note>
+Debug logging provides detailed information about WebSocket messages, SSH connections, authentication flows, and database operations.
+</Note>
+
+### View Real-Time Logs
+
+```bash
+# All services
+docker compose logs -f
+
+# Specific service
+docker compose logs -f sushi-backend
+```
+
+### Common Log Messages
+
+**Normal Operations:**
+- `JWT token: [token]` - Successful authentication
+- `Connected to machine successfully` - SSH connection established
+- `SSH connection stored successfully` - Connection cached with UUID
+
+**Warnings/Errors:**
+- `No SSH connection found for UUID` - Invalid or expired connection ID
+- `Error reading WebSocket message` - Client disconnected or network issue
+- `Failed to connect to machine` - SSH connection failed
+
+---
+
+## Getting Additional Help
+
+If you've tried the solutions above and still experience issues:
+
+1. Check the [GitHub repository](https://github.com/aswinbennyofficial/SuSHi) for known issues
+2. Enable debug logging and review the logs for specific error messages
+3. Open a GitHub issue with:
+   - Error message and stack trace
+   - Steps to reproduce
+   - Environment details (OS, Docker version, etc.)
+   - Relevant log excerpts

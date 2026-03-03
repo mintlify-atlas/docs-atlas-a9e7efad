@@ -1,0 +1,60 @@
+---
+title: "Welcome to suSHi"
+description: "A web-based platform for secure SSH connections with browser-based terminal access from anywhere"
+---
+
+## Access your servers from anywhere
+
+suSHi transforms SSH connections into a seamless web experience. Connect to your remote machines securely through your browser, without installing SSH clients or managing connection configurations on every device.
+
+<CardGroup cols={2}>
+  <Card title="Browser-based terminal" icon="terminal" iconType="duotone">
+    Access a fully functional terminal directly in your web browser with real-time communication via WebSockets.
+  </Card>
+  
+  <Card title="Secure connections" icon="shield-check" iconType="duotone">
+    Connect to remote machines using industry-standard SSH protocols with encrypted private key storage.
+  </Card>
+  
+  <Card title="Encrypted key storage" icon="lock" iconType="duotone">
+    Private keys are encrypted using AES-CFB with PBKDF2-HMAC-SHA256 (10,000 iterations) and unique salts per key.
+  </Card>
+  
+  <Card title="User-friendly interface" icon="wand-magic-sparkles" iconType="duotone">
+    Intuitive dashboard to manage multiple machines and active terminal sessions in one place.
+  </Card>
+</CardGroup>
+
+## How it works
+
+suSHi acts as a bridge between your web browser and remote servers:
+
+<Steps>
+  <Step title="Add your machines">
+    Configure your remote machines with hostname, port, username, and SSH credentials.
+  </Step>
+  
+  <Step title="Connect securely">
+    Authenticate with OAuth (Google or GitHub) and access your machine dashboard.
+  </Step>
+  
+  <Step title="Launch terminals">
+    Open browser-based terminals with real-time WebSocket communication to your servers.
+  </Step>
+</Steps>
+
+## Quick links
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get from zero to your first SSH connection in minutes.
+  </Card>
+  
+  <Card title="Installation guide" icon="download" href="/installation">
+    Set up suSHi with Docker and configure your environment.
+  </Card>
+</CardGroup>
+
+<Note>
+  suSHi is currently in active development. Features and APIs may change as the project evolves.
+</Note>

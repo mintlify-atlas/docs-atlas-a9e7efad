@@ -1,0 +1,478 @@
+---
+title: Machines
+description: CRUD operations for managing SSH machines
+---
+
+## Overview
+
+The Machines API allows you to create, read, update, and delete SSH machine configurations. All endpoints require JWT authentication.
+
+## Create Machine
+
+```bash cURL
+curl -X POST "http://localhost:8080/api/v1/machine" \
+  -H "Content-Type: application/json" \
+  -b "jwt=your-jwt-token" \
+  -d '{
+    "name": "Production Server",
+    "hostname": "192.168.1.100",
+    "port": "22",
+    "username": "ubuntu",
+    "password": "optional-password",
+    "private_key": "optional-private-key",
+    "passphrase": "optional-passphrase",
+    "organization": "my-org"
+  }'
+```
+
+`POST /api/v1/machine`
+
+Create a new SSH machine configuration.
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Friendly name for the machine
+</ParamField>
+
+<ParamField body="hostname" type="string" required>
+  IP address or hostname of the SSH server
+</ParamField>
+
+<ParamField body="port" type="string" required>
+  SSH port (typically "22")
+</ParamField>
+
+<ParamField body="username" type="string" required>
+  SSH username for authentication
+</ParamField>
+
+<ParamField body="password" type="string">
+  SSH password (required if not using private key). Encrypted before storage.
+</ParamField>
+
+<ParamField body="private_key" type="string">
+  SSH private key (required if not using password). Encrypted before storage.
+</ParamField>
+
+<ParamField body="passphrase" type="string">
+  Passphrase for encrypted private key (optional). Encrypted before storage.
+</ParamField>
+
+<ParamField body="organization" type="string">
+  Organization identifier (optional)
+</ParamField>
+
+### Response
+
+```json
+{
+  "status": "OK",
+  "message": "Machine created successfully",
+  "data": null
+}
+```
+
+### Error Responses
+
+<Expandable title="401 - Unauthorized">
+```json
+{
+  "status": "Unauthorized",
+  "message": "Invalid or missing JWT token",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="500 - Database Error">
+```json
+{
+  "status": "Internal Server Error",
+  "message": "Error saving machine to database",
+  "data": null
+}
+```
+</Expandable>
+
+---
+
+## List Machines
+
+```bash cURL
+curl -X GET "http://localhost:8080/api/v1/machines" \
+  -b "jwt=your-jwt-token"
+```
+
+`GET /api/v1/machines`
+
+Retrieve all machines for the authenticated user.
+
+### Response
+
+```json
+{
+  "status": "OK",
+  "message": "Machines fetched successfully",
+  "data": [
+    {
+      "id": 1,
+      "name": "Production Server",
+      "username": "ubuntu",
+      "hostname": "192.168.1.100",
+      "port": "22",
+      "owner_id": "user@example.com",
+      "owner_type": "user"
+    },
+    {
+      "id": 2,
+      "name": "Development Server",
+      "username": "admin",
+      "hostname": "dev.example.com",
+      "port": "2222",
+      "owner_id": "user@example.com",
+      "owner_type": "user"
+    }
+  ]
+}
+```
+
+### Response Fields
+
+<ResponseField name="data" type="array">
+  Array of machine objects
+</ResponseField>
+
+<ResponseField name="data[].id" type="number">
+  Unique machine identifier
+</ResponseField>
+
+<ResponseField name="data[].name" type="string">
+  Machine name
+</ResponseField>
+
+<ResponseField name="data[].username" type="string">
+  SSH username
+</ResponseField>
+
+<ResponseField name="data[].hostname" type="string">
+  SSH hostname or IP address
+</ResponseField>
+
+<ResponseField name="data[].port" type="string">
+  SSH port
+</ResponseField>
+
+<ResponseField name="data[].owner_id" type="string">
+  User email who owns this machine
+</ResponseField>
+
+<ResponseField name="data[].owner_type" type="string">
+  Owner type (always "user")
+</ResponseField>
+
+### Notes
+
+- Sensitive fields (password, private_key, passphrase) are NOT returned by this endpoint
+- Only machines owned by the authenticated user are returned
+- Results are filtered by username extracted from JWT token
+
+### Error Responses
+
+<Expandable title="401 - Unauthorized">
+```json
+{
+  "status": "Unauthorized",
+  "message": "Invalid or missing JWT token",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="500 - Database Error">
+```json
+{
+  "status": "Internal Server Error",
+  "message": "Error fetching machines from database",
+  "data": null
+}
+```
+</Expandable>
+
+---
+
+## Get Machine
+
+```bash cURL
+curl -X GET "http://localhost:8080/api/v1/machine/1" \
+  -b "jwt=your-jwt-token"
+```
+
+`GET /api/v1/machine/{id}`
+
+Retrieve details for a specific machine.
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  Machine ID
+</ParamField>
+
+### Response
+
+```json
+{
+  "status": "OK",
+  "message": "Machine fetched successfully",
+  "data": {
+    "id": 1,
+    "name": "Production Server",
+    "username": "ubuntu",
+    "hostname": "192.168.1.100",
+    "port": "22",
+    "owner_id": "user@example.com",
+    "owner_type": "user"
+  }
+}
+```
+
+### Response Fields
+
+<ResponseField name="data" type="object">
+  Machine object
+</ResponseField>
+
+<ResponseField name="data.id" type="number">
+  Unique machine identifier
+</ResponseField>
+
+<ResponseField name="data.name" type="string">
+  Machine name
+</ResponseField>
+
+<ResponseField name="data.username" type="string">
+  SSH username
+</ResponseField>
+
+<ResponseField name="data.hostname" type="string">
+  SSH hostname or IP address
+</ResponseField>
+
+<ResponseField name="data.port" type="string">
+  SSH port
+</ResponseField>
+
+<ResponseField name="data.owner_id" type="string">
+  User email who owns this machine
+</ResponseField>
+
+<ResponseField name="data.owner_type" type="string">
+  Owner type (always "user")
+</ResponseField>
+
+### Notes
+
+- Sensitive fields (password, private_key, passphrase) are NOT returned
+- Users can only access machines they own
+- Authorization is enforced via JWT username
+
+### Error Responses
+
+<Expandable title="401 - Unauthorized">
+```json
+{
+  "status": "Unauthorized",
+  "message": "Invalid or missing JWT token",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="404 - Not Found">
+```json
+{
+  "status": "Not Found",
+  "message": "Machine not found in database",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="500 - Database Error">
+```json
+{
+  "status": "Internal Server Error",
+  "message": "Error fetching machine from database",
+  "data": null
+}
+```
+</Expandable>
+
+---
+
+## Delete Machine
+
+```bash cURL
+curl -X DELETE "http://localhost:8080/api/v1/machine/1" \
+  -b "jwt=your-jwt-token"
+```
+
+`DELETE /api/v1/machine/{id}`
+
+Delete a machine configuration.
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  Machine ID to delete
+</ParamField>
+
+### Response
+
+```json
+{
+  "status": "OK",
+  "message": "Machine deleted successfully",
+  "data": null
+}
+```
+
+### Notes
+
+- Users can only delete machines they own
+- Authorization is enforced via JWT username
+- Deletion is permanent and cannot be undone
+
+### Error Responses
+
+<Expandable title="401 - Unauthorized">
+```json
+{
+  "status": "Unauthorized",
+  "message": "Invalid or missing JWT token",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="500 - Database Error">
+```json
+{
+  "status": "Internal Server Error",
+  "message": "Error deleting machine from database",
+  "data": null
+}
+```
+</Expandable>
+
+---
+
+## Connect to Machine
+
+```bash cURL
+curl -X POST "http://localhost:8080/api/v1/machine/1/connect" \
+  -H "Content-Type: application/json" \
+  -b "jwt=your-jwt-token" \
+  -d '{
+    "password": "your-master-password"
+  }'
+```
+
+`POST /api/v1/machine/{id}/connect`
+
+Initiate an SSH connection and retrieve a UUID for WebSocket connection.
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  Machine ID to connect to
+</ParamField>
+
+### Request Body
+
+<ParamField body="password" type="string" required>
+  Master password to decrypt machine credentials (encrypted private key, passphrase, or SSH password)
+</ParamField>
+
+### Response
+
+```json
+{
+  "status": "OK",
+  "message": "Connected to machine successfully",
+  "data": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+<ResponseField name="data" type="string">
+  UUID for establishing WebSocket connection. Valid for the current time bucket (rounded to nearest minute).
+</ResponseField>
+
+### Connection Flow
+
+1. User provides master password to decrypt credentials
+2. Machine credentials are retrieved from database and decrypted
+3. SSH connection is established to the remote machine
+4. UUID is generated and SSH client is stored in memory
+5. UUID is associated with a time bucket (rounded to nearest minute)
+6. Client uses UUID to establish WebSocket connection at `/ssh?uuid={uuid}`
+
+### Notes
+
+- The UUID is temporary and stored in memory with a time bucket
+- Time buckets are used for automatic cleanup of stale connections
+- The SSH connection remains open until WebSocket is established
+- Users can only connect to machines they own
+
+### Error Responses
+
+<Expandable title="401 - Unauthorized">
+```json
+{
+  "status": "Unauthorized",
+  "message": "Invalid or missing JWT token",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="404 - Not Found">
+```json
+{
+  "status": "Not Found",
+  "message": "Machine not found in database",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="500 - Connection Error">
+```json
+{
+  "status": "Internal Server Error",
+  "message": "Error connecting to machine",
+  "data": null
+}
+```
+This error occurs when SSH connection fails (invalid credentials, unreachable host, network error, etc.)
+</Expandable>
+
+<Expandable title="500 - Database Error">
+```json
+{
+  "status": "Internal Server Error",
+  "message": "Error fetching machine from database",
+  "data": null
+}
+```
+</Expandable>
+
+<Expandable title="500 - Decryption Error">
+```json
+{
+  "status": "Internal Server Error",
+  "message": "Error decoding post body",
+  "data": null
+}
+```
+</Expandable>

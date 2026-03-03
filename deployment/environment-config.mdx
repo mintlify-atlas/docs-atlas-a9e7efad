@@ -1,0 +1,390 @@
+---
+title: Environment Configuration
+description: Complete guide to configuring suSHi environment variables for deployment
+---
+
+## Overview
+
+suSHi uses environment variables for configuration, loaded via the `utils/load_config.go` module. All settings can be configured through environment variables, with some having default values.
+
+## Configuration Loading
+
+The application loads configuration in the following order:
+
+1. Environment variables (highest priority)
+2. OAuth configuration from `config/oauth.yaml`
+3. Default values (lowest priority)
+
+Environment variables are read at application startup using Go's `os.Getenv()` function.
+
+## Core Configuration
+
+### Server Settings
+
+<ParamField path="SERVER_PORT" type="string" required>
+  Port number for the HTTP server.
+  
+  **Example**: `8080`
+  
+  **Used in**: `docker-compose.yaml:30`, `load_config.go:20`
+</ParamField>
+
+<ParamField path="LOG_LEVEL" type="string" default="Info">
+  Logging level for the application. Valid values: `Debug`, `Info`, `Warn`, `Error`.
+  
+  **Example**: `Debug`
+  
+  **Used in**: `docker-compose.yaml:31`, `load_config.go:22`
+  
+  <Warning>
+    Use `Debug` only in development. Set to `Info` or `Warn` in production for better performance.
+  </Warning>
+</ParamField>
+
+<ParamField path="LOG_PATH" type="string" default="./logs">
+  Directory path for log files. Trailing slashes are automatically removed.
+  
+  **Example**: `./logs` or `/var/log/sushi`
+  
+  **Used in**: `load_config.go:23`, `load_config.go:42-46`
+</ParamField>
+
+<ParamField path="JWT_SECRET" type="string" required>
+  Secret key for signing JWT tokens. Must be kept secure.
+  
+  **Minimum length**: 32 characters recommended
+  
+  **Example**: `your_random_jwt_secret_min_32_chars`
+  
+  **Used in**: `docker-compose.yaml:32`, `load_config.go:21`
+  
+  <Warning>
+    **Critical Security Setting**: Never use the default value `secret123` in production. Generate a strong random secret.
+  </Warning>
+</ParamField>
+
+## Database Configuration
+
+All database connection parameters are loaded from environment variables and used to construct the connection string.
+
+<ParamField path="DB_HOST" type="string" required>
+  PostgreSQL database host. Use `postgres` when running with Docker Compose (service name), or `localhost` for local development.
+  
+  **Example**: `postgres` (Docker) or `localhost`
+  
+  **Used in**: `docker-compose.yaml:33`, `load_config.go:32`
+</ParamField>
+
+<ParamField path="DB_PORT" type="string" required>
+  PostgreSQL database port.
+  
+  **Default PostgreSQL port**: `5432`
+  
+  **Used in**: `docker-compose.yaml:34`, `load_config.go:33`
+</ParamField>
+
+<ParamField path="DB_USER" type="string" required>
+  PostgreSQL database username.
+  
+  **Example**: `postgres`
+  
+  **Used in**: `docker-compose.yaml:35`, `load_config.go:34`
+</ParamField>
+
+<ParamField path="DB_PASSWORD" type="string" required>
+  PostgreSQL database password.
+  
+  **Example**: `secure_password_here`
+  
+  **Used in**: `docker-compose.yaml:36`, `load_config.go:35`
+  
+  <Warning>
+    Change the default password `postgres` in production deployments.
+  </Warning>
+</ParamField>
+
+<ParamField path="DB_NAME" type="string" required>
+  PostgreSQL database name.
+  
+  **Example**: `sushi`
+  
+  **Used in**: `docker-compose.yaml:37`, `load_config.go:36`
+</ParamField>
+
+<ParamField path="MIGRATE_DB" type="boolean" default="false">
+  Enable automatic database migrations on startup. Set to `true` to run migrations automatically.
+  
+  **Example**: `true`
+  
+  **Used in**: `docker-compose.yaml:38`, `load_config.go:38`, `migrations.go:13-18`
+  
+  When enabled, the application will automatically run all pending migrations from the `db/migrations/` directory using Goose.
+</ParamField>
+
+## OAuth Authentication
+
+suSHi supports OAuth authentication with Google and GitHub. Configuration is loaded from both environment variables and the `config/oauth.yaml` file.
+
+### Google OAuth
+
+<ParamField path="GOOGLE_CLIENT_ID" type="string">
+  Google OAuth 2.0 client ID from Google Cloud Console.
+  
+  **Used in**: `docker-compose.yaml:41`, `load_config.go:66`, `oauth.yaml:3`
+  
+  **How to obtain**: Create OAuth 2.0 credentials in [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+</ParamField>
+
+<ParamField path="GOOGLE_CLIENT_SECRET" type="string">
+  Google OAuth 2.0 client secret.
+  
+  **Used in**: `docker-compose.yaml:42`, `load_config.go:67`, `oauth.yaml:4`
+  
+  <Warning>
+    Keep this value secret. Never commit it to version control.
+  </Warning>
+</ParamField>
+
+<ParamField path="GOOGLE_REDIRECT_URL" type="string">
+  OAuth callback URL for Google authentication.
+  
+  **Example**: `http://localhost:8080/api/v1/auth/callback`
+  
+  **Used in**: `docker-compose.yaml:43`, `load_config.go:68`, `oauth.yaml:8`
+  
+  **OAuth Scopes** (from `oauth.yaml:5-7`):
+  - `https://www.googleapis.com/auth/userinfo.email`
+  - `https://www.googleapis.com/auth/userinfo.profile`
+</ParamField>
+
+### GitHub OAuth
+
+<ParamField path="GITHUB_CLIENT_ID" type="string">
+  GitHub OAuth App client ID.
+  
+  **Used in**: `docker-compose.yaml:45`, `load_config.go:69`, `oauth.yaml:12`
+  
+  **How to obtain**: Create an OAuth App in [GitHub Developer Settings](https://github.com/settings/developers)
+</ParamField>
+
+<ParamField path="GITHUB_CLIENT_SECRET" type="string">
+  GitHub OAuth App client secret.
+  
+  **Used in**: `docker-compose.yaml:46`, `load_config.go:70`, `oauth.yaml:13`
+  
+  <Warning>
+    Keep this value secret. Never commit it to version control.
+  </Warning>
+</ParamField>
+
+<ParamField path="GITHUB_REDIRECT_URL" type="string">
+  OAuth callback URL for GitHub authentication.
+  
+  **Example**: `http://localhost:8080/api/v1/auth/callback`
+  
+  **Used in**: `docker-compose.yaml:47`, `load_config.go:71`, `oauth.yaml:17`
+  
+  **OAuth Scopes** (from `oauth.yaml:14-16`):
+  - `read:user`
+  - `read:email`
+</ParamField>
+
+## SSH Configuration
+
+These environment variables configure SSH connections for remote machine management.
+
+<ParamField path="SSH_HOST" type="string">
+  SSH server hostname or IP address.
+  
+  **Used in**: `load_config.go:26`
+</ParamField>
+
+<ParamField path="SSH_PORT" type="string" default="22">
+  SSH server port.
+  
+  **Used in**: `load_config.go:27`
+</ParamField>
+
+<ParamField path="SSH_USER" type="string">
+  SSH username for authentication.
+  
+  **Used in**: `load_config.go:28`
+</ParamField>
+
+<ParamField path="SSH_PRIVATE_KEY" type="string">
+  Path to SSH private key file or the private key content.
+  
+  **Used in**: `load_config.go:29`
+</ParamField>
+
+## Configuration File Structure
+
+The configuration is mapped to the following Go struct (from `models/config.go`):
+
+```go
+type Config struct {
+    ServerPort         string
+    JWTSecret          string
+    LogLevel           string
+    LogPath            string
+    SSHConfig          SSHConfig
+    DatabaseConfig     DatabaseConfig
+    DB                 *pgxpool.Pool
+    Router             *chi.Mux
+    DoMigrations       bool
+    OAuthConfig        OAuthConfig
+}
+
+type DatabaseConfig struct {
+    Host     string
+    Port     string
+    User     string
+    Password string
+    Database string
+    String   string
+}
+
+type OAuthConfig struct {
+    Google ProviderConfig
+    GitHub ProviderConfig
+}
+
+type ProviderConfig struct {
+    ClientID     string
+    ClientSecret string
+    Scopes       []string
+    RedirectURL  string
+    State        string
+}
+```
+
+## Environment File Examples
+
+### Development (.env.development)
+
+```bash
+# Server Configuration
+SERVER_PORT=8080
+LOG_LEVEL=Debug
+LOG_PATH=./logs
+JWT_SECRET=dev_secret_change_in_production
+
+# Database Configuration
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_NAME=sushi
+MIGRATE_DB=true
+
+# OAuth - Leave empty if not using
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URL=http://localhost:8080/api/v1/auth/callback
+
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+GITHUB_REDIRECT_URL=http://localhost:8080/api/v1/auth/callback
+```
+
+### Production (.env.production)
+
+```bash
+# Server Configuration
+SERVER_PORT=8080
+LOG_LEVEL=Info
+LOG_PATH=/var/log/sushi
+JWT_SECRET=your_secure_random_jwt_secret_minimum_32_characters_long
+
+# Database Configuration
+DB_HOST=postgres
+DB_PORT=5432
+DB_USER=sushi_user
+DB_PASSWORD=your_secure_database_password_here
+DB_NAME=sushi_prod
+MIGRATE_DB=true
+
+# OAuth Configuration
+GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+GOOGLE_REDIRECT_URL=https://yourdomain.com/api/v1/auth/callback
+
+GITHUB_CLIENT_ID=your_github_client_id
+GITHUB_CLIENT_SECRET=your_github_client_secret
+GITHUB_REDIRECT_URL=https://yourdomain.com/api/v1/auth/callback
+```
+
+## Using Environment Files with Docker
+
+To use an environment file with Docker Compose:
+
+<Steps>
+  <Step title="Create an environment file">
+    Create a `.env` file in the same directory as `docker-compose.yaml`:
+    
+    ```bash
+    cp .env.production .env
+    ```
+  </Step>
+
+  <Step title="Update docker-compose.yaml">
+    Replace the `environment` section with `env_file`:
+    
+    ```yaml
+    sushi-backend:
+      image: breeze5690/sushi-backend-prod:v1
+      ports:
+        - "8080:8080"
+      env_file:
+        - .env
+      depends_on:
+        - postgres
+      restart: always
+    ```
+  </Step>
+
+  <Step title="Start the services">
+    ```bash
+    docker-compose up -d
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  **Security Best Practice**: Never commit `.env` files containing secrets to version control. Add them to `.gitignore`.
+</Warning>
+
+## Validation and Troubleshooting
+
+### Check Configuration Loading
+
+Enable debug logging to see configuration values at startup:
+
+```bash
+LOG_LEVEL=Debug
+```
+
+The application logs will show which configuration values were loaded (sensitive values are not logged).
+
+### Common Issues
+
+**Database connection failed**:
+- Verify `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` are correct
+- Ensure the database server is running and accessible
+- Check firewall rules if using a remote database
+
+**OAuth authentication not working**:
+- Verify client ID and secret are correct
+- Ensure redirect URLs match exactly in both the OAuth provider settings and your configuration
+- Check that the OAuth provider's authorized domains include your application domain
+
+**Migrations not running**:
+- Ensure `MIGRATE_DB=true` (not `MIGRATE_DB=True` or `MIGRATE_DB=1`)
+- Check that the database user has permission to create tables
+- Review logs for migration errors
+
+## Next Steps
+
+- Learn about [Database Setup](/deployment/database-setup) and schema
+- Set up [Docker Deployment](/deployment/docker-setup)
+- Configure OAuth providers in Google Cloud Console and GitHub
